@@ -44,16 +44,20 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class GatewayServer {
     private static final int L2_DEPTH = 5;
-    private static final int DEFAULT_SYMBOLS = 1;
     private static final int DEFAULT_RING = 1024;
     static final String WS_PORT_PLACEHOLDER = "__WS_PORT__";
+
+    /** Watchlist pairs (ADR-0007): base symbols the gateway mocks. */
+    private static final String[] PAIR_BASES = {"clob", "eth", "sol", "bnb", "aave", "blur"};
+    private static final long[] PAIR_START_MIDS = {1000, 300_000, 20_000, 60_000, 9_000, 2_500};
+    private static final double[] PAIR_VOLATILITY = {2.0, 6.0, 5.0, 4.5, 7.5, 9.0};
 
     private final Gateway gateway;
     private final Path uiDir;
     private final CopyOnWriteArrayList<WsSession> sessions = new CopyOnWriteArrayList<>();
     private final AtomicBoolean subscribed = new AtomicBoolean();
     private final AtomicBoolean running = new AtomicBoolean();
-    private MockMarketMaker mockMaker;
+    private final java.util.List<MockMarketMaker> mockMakers = new java.util.ArrayList<>();
     private final boolean startMock;
 
     private HttpServer httpServer;
@@ -63,7 +67,7 @@ public final class GatewayServer {
     private int wsPort;
 
     public GatewayServer() {
-        this(new Gateway(DEFAULT_SYMBOLS, DEFAULT_RING), defaultUiDir(), resolveMockArg());
+        this(new Gateway(PAIR_BASES.length, DEFAULT_RING), defaultUiDir(), resolveMockArg());
     }
 
     public GatewayServer(Gateway gateway, Path uiDir) {
@@ -132,8 +136,12 @@ public final class GatewayServer {
         wsPort = wsListener.getLocalPort();
 
         if (startMock) {
-            mockMaker = new MockMarketMaker(gateway, 0, 100);
-            mockMaker.start();
+            for (int i = 0; i < PAIR_BASES.length; i++) {
+                MockMarketMaker maker = new MockMarketMaker(gateway, i, 100,
+                        PAIR_VOLATILITY[i], PAIR_START_MIDS[i]);
+                maker.start();
+                mockMakers.add(maker);
+            }
         }
 
         // Publish running BEFORE the acceptor starts: the accept loop checks this flag and
@@ -146,10 +154,10 @@ public final class GatewayServer {
 
     public synchronized void stop() {
         running.set(false);
-        if (mockMaker != null) {
-            mockMaker.stop();
-            mockMaker = null;
+        for (MockMarketMaker maker : mockMakers) {
+            maker.stop();
         }
+        mockMakers.clear();
         for (WsSession session : sessions) {
             session.closeQuietly();
         }
@@ -423,6 +431,7 @@ public final class GatewayServer {
     }
 
     private void onGatewayFrame(GatewayFrame frame) {
+        int symbolId = frame.symbolId() < 0 ? 0 : frame.symbolId();
         for (WsSession session : sessions) {
             if (!session.open) {
                 continue;
@@ -431,13 +440,14 @@ public final class GatewayServer {
                 long bookSeq = session.nextSeq();
                 for (Trade trade : frame.trades()) {
                     long tradeSeq = session.nextSeq();
-                    sendText(session, tradeJson(tradeSeq, trade));
-                    sendText(session, binanceAggTradeJson(tradeSeq,
+                    sendText(session, tradeJson(tradeSeq, symbolId, trade));
+                    sendText(session, binanceAggTradeJson(symbolId, tradeSeq,
                             trade.makerOrderId(), trade.takerOrderId(),
                             trade.priceTicks(), trade.quantity()));
+                    sendKlineThrottled(session, symbolId, trade);
                 }
-                sendText(session, l2Json(bookSeq, snapshot(session.symbolId)));
-                sendBinanceDepthThrottled(session);
+                sendText(session, l2Json(bookSeq, symbolId, snapshot(symbolId)));
+                sendBinanceDepthThrottled(session, symbolId);
             } catch (RuntimeException e) {
                 session.closeQuietly();
                 sessions.remove(session);
@@ -446,16 +456,46 @@ public final class GatewayServer {
     }
 
     private static final long DEPTH_INTERVAL_NANOS = 500_000_000L; // 500 ms
+    private static final long KLINE_INTERVAL_NANOS = 100_000_000L; // 100 ms
 
-    /** Binance depth10 snapshot at most every 500ms per session. */
-    private void sendBinanceDepthThrottled(WsSession session) {
+    /** Binance depth10 + bookTicker at most every 500ms per session. */
+    private void sendBinanceDepthThrottled(WsSession session, int symbolId) {
         long now = System.nanoTime();
         long last = session.lastDepthSentNano;
         if (last != 0 && now - last < DEPTH_INTERVAL_NANOS) {
             return;
         }
         session.lastDepthSentNano = now;
-        sendText(session, binanceDepth10Json(session.nextSeq(), snapshot(session.symbolId)));
+        var book = gateway.exchange().router().shard(symbolId).engine().book();
+        long frameSeq = session.nextSeq();
+        sendText(session, binanceDepth10Json(symbolId, frameSeq, book.snapshot(L2_DEPTH)));
+        sendText(session, binanceBookTickerJson(symbolId, frameSeq, book));
+    }
+
+    /** Live 1m candle update at most every 100ms per session; klines close at minute boundaries. */
+    private void sendKlineThrottled(WsSession session, int symbolId, Trade trade) {
+        long nowWall = System.currentTimeMillis();
+        CandleAggregator agg = session.candles[symbolId];
+        if (agg == null) {
+            agg = new CandleAggregator();
+            session.candles[symbolId] = agg;
+        } else if (agg.hasCandle() && agg.bucketOpen != nowWall - (nowWall % CandleAggregator.BUCKET_MILLIS)) {
+            // emit the closed previous candle first
+            sendText(session, binanceKlineJson(symbolId,
+                    agg.klineJson(binanceSymbolUpper(symbolId), true)));
+        }
+        String kline = agg.onTrade(trade.priceTicks(), trade.quantity(), nowWall,
+                binanceSymbolUpper(symbolId));
+        long now = System.nanoTime();
+        if (session.lastKlineSentNano == 0 || now - session.lastKlineSentNano >= KLINE_INTERVAL_NANOS) {
+            session.lastKlineSentNano = now;
+            sendText(session, binanceKlineJson(symbolId, kline));
+        }
+    }
+
+    /** Wrap a raw kline payload in the combined-stream envelope. */
+    static String binanceKlineJson(int symbolId, String klinePayload) {
+        return "{\"stream\":\"" + binanceSymbol(symbolId) + "@kline_1m\",\"data\":" + klinePayload + "}";
     }
 
     private L2Snapshot snapshot(int symbolId) {
@@ -479,9 +519,9 @@ public final class GatewayServer {
         return sb.toString();
     }
 
-    private static String l2Json(long seq, L2Snapshot snap) {
+    private static String l2Json(long seq, int symbolId, L2Snapshot snap) {
         StringBuilder sb = new StringBuilder(96);
-        sb.append("{\"t\":\"l2\",\"seq\":").append(seq).append(",\"bids\":");
+        sb.append("{\"t\":\"l2\",\"sym\":").append(symbolId).append(",\"seq\":").append(seq).append(",\"bids\":");
         appendLevels(sb, snap.bids());
         sb.append(",\"asks\":");
         appendLevels(sb, snap.asks());
@@ -489,8 +529,9 @@ public final class GatewayServer {
         return sb.toString();
     }
 
-    private static String tradeJson(long seq, Trade trade) {
+    private static String tradeJson(long seq, int symbolId, Trade trade) {
         return "{\"t\":\"trade\",\"seq\":" + seq
+                + ",\"sym\":" + symbolId
                 + ",\"maker\":" + trade.makerOrderId()
                 + ",\"taker\":" + trade.takerOrderId()
                 + ",\"px\":" + trade.priceTicks()
@@ -503,7 +544,13 @@ public final class GatewayServer {
      * (rust-project/trading-ui) consume the same event stream.
      * Envelope: {"stream":"clobusdt@aggTrade","data":{...aggTrade...}}
      */
-    static final String BINANCE_SYMBOL = "clobusdt";
+    static String binanceSymbol(int symbolId) {
+        return PAIR_BASES[Math.floorMod(symbolId, PAIR_BASES.length)] + "usdt";
+    }
+
+    static String binanceSymbolUpper(int symbolId) {
+        return binanceSymbol(symbolId).toUpperCase(Locale.ROOT);
+    }
     private static final long SYNTH_BASE = 1_000_000L;
     static final long MOCK_ID_BASE = 1_000_000L; // MockMarketMaker's BASE_ID; keep in sync
 
@@ -514,14 +561,15 @@ public final class GatewayServer {
      * (taker odd = BUY). Good enough for tape coloring; exact side tagging is a
      * follow-up if needed (would require carrying taker side on Trade).
      */
-    static String binanceAggTradeJson(long seq, long makerOrderId, long takerOrderId, long priceTicks, long quantity) {
+    static String binanceAggTradeJson(int symbolId, long seq, long makerOrderId, long takerOrderId,
+                                      long priceTicks, long quantity) {
         boolean takerIsBuy = takerOrderId < SYNTH_BASE ? takerOrderId % 2 == 1 : true;
         // m = buyerIsMaker = NOT takerIsBuy (taker bought => buyer is the taker => buyer not maker)
         String m = Boolean.toString(!takerIsBuy);
-        return "{\"stream\":\"" + BINANCE_SYMBOL + "@aggTrade\",\"data\":{"
+        return "{\"stream\":\"" + binanceSymbol(symbolId) + "@aggTrade\",\"data\":{"
                 + "\"e\":\"aggTrade\""
                 + ",\"a\":" + seq
-                + ",\"s\":\"" + BINANCE_SYMBOL.toUpperCase(Locale.ROOT) + "\""
+                + ",\"s\":\"" + binanceSymbolUpper(symbolId) + "\""
                 + ",\"p\":\"" + priceTicks + "\""
                 + ",\"q\":\"" + quantity + "\""
                 + ",\"m\":" + m
@@ -529,9 +577,23 @@ public final class GatewayServer {
                 + "}}";
     }
 
-    static String binanceDepth10Json(long seq, L2Snapshot snap) {
+    /** Binance bookTicker: {u,s,b,B,a,A} — best bid/ask with quantities (ADR-0007). */
+    static String binanceBookTickerJson(int symbolId, long updateId, com.cloblab.book.OrderBookView book) {
+        String b = String.valueOf(book.bestBid());
+        String a = String.valueOf(book.bestAsk());
+        return "{\"stream\":\"" + binanceSymbol(symbolId) + "@bookTicker\",\"data\":{"
+                + "\"u\":" + updateId
+                + ",\"s\":\"" + binanceSymbolUpper(symbolId) + "\""
+                + ",\"b\":\"" + (book.bestBid() == null ? "0" : b) + "\""
+                + ",\"B\":\"" + book.totalBidQuantity() + "\""
+                + ",\"a\":\"" + (book.bestAsk() == null ? "0" : a) + "\""
+                + ",\"A\":\"" + book.totalAskQuantity() + "\""
+                + "}}";
+    }
+
+    static String binanceDepth10Json(int symbolId, long seq, L2Snapshot snap) {
         StringBuilder sb = new StringBuilder(192);
-        sb.append("{\"stream\":\"").append(BINANCE_SYMBOL).append("@depth10@100ms\",\"data\":{");
+        sb.append("{\"stream\":\"").append(binanceSymbol(symbolId)).append("@depth10@100ms\",\"data\":{");
         sb.append("\"lastUpdateId\":").append(seq);
         sb.append(",\"bids\":");
         appendLevelRows(sb, snap.bids());
@@ -626,7 +688,9 @@ public final class GatewayServer {
         final OutputStream out;
         private final Socket socket;
         final AtomicLong seq = new AtomicLong();
-        volatile long lastDepthSentNano;
+        final CandleAggregator[] candles = new CandleAggregator[PAIR_BASES.length];
+        volatile long lastDepthSentNano = 0;
+        volatile long lastKlineSentNano = 0;
         volatile boolean open = true;
 
         WsSession(int symbolId, InputStream in, OutputStream out, Socket socket) {

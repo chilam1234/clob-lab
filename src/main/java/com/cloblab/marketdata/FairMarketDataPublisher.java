@@ -20,7 +20,7 @@ public final class FairMarketDataPublisher {
         void onFairRelease(FairRelease release);
     }
 
-    public record FairRelease(long releaseNano, List<Trade> trades, List<L2Snapshot> snapshots) {}
+    public record FairRelease(int symbolId, long releaseNano, List<Trade> trades, List<L2Snapshot> snapshots) {}
 
     public void subscribe(Subscriber subscriber) {
         subscribers.add(subscriber);
@@ -39,12 +39,16 @@ public final class FairMarketDataPublisher {
      * Used both as {@link com.cloblab.exchange.CloudExchange#flushBatch()} batch mode and as
      * the per-frame flush requested by a dedicated shard consumer after each command.
      */
-    public synchronized FairRelease flush() {
+    public synchronized FairRelease flush() { return flush(-1); }
+
+    /** Per-shard flush: the release carries the shard's symbolId. */
+    public synchronized FairRelease flush(int symbolId) {
         if (pendingTrades.isEmpty() && pendingSnapshots.isEmpty()) {
             return null;
         }
         lastReleaseNano = System.nanoTime();
         FairRelease release = new FairRelease(
+                symbolId,
                 lastReleaseNano,
                 List.copyOf(pendingTrades),
                 List.copyOf(pendingSnapshots));

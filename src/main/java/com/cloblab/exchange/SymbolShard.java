@@ -126,7 +126,7 @@ public final class SymbolShard {
                 throw ignored;
             }
         }
-        publisher.flush();
+        publisher.flush(symbolId);
     }
 
     private void apply(SequencedCommand sequenced) {

@@ -13,13 +13,13 @@ import java.util.List;
  * always reference copies, never the scratch buffers. Do not assume a frame remains valid
  * if you retain matcher-owned objects obtained outside this type.
  */
-public record GatewayFrame(long releaseNano, List<Trade> trades, List<L2Snapshot> snapshots) {
+public record GatewayFrame(int symbolId, long releaseNano, List<Trade> trades, List<L2Snapshot> snapshots) {
     public GatewayFrame {
         trades = List.copyOf(trades);
         snapshots = List.copyOf(snapshots);
     }
 
     static GatewayFrame from(FairMarketDataPublisher.FairRelease release) {
-        return new GatewayFrame(release.releaseNano(), release.trades(), release.snapshots());
+        return new GatewayFrame(release.symbolId(), release.releaseNano(), release.trades(), release.snapshots());
     }
 }
