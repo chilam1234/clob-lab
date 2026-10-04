@@ -7,8 +7,7 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-prs: true
-  # sequential on main, superseded PR runs are the point; do NOT cancel main pushes
+  # sequential on main is the point; do NOT cancel main pushes, only superseded PR runs
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
