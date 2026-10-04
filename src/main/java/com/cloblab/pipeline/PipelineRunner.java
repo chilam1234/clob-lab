@@ -4,6 +4,7 @@ import com.cloblab.exchange.CloudExchange;
 import com.cloblab.marketdata.FairMarketDataPublisher;
 import com.cloblab.model.Side;
 import com.cloblab.protocol.InboundCommand;
+import com.cloblab.journal.EventJournal;
 
 /**
  * Demo of the 2024+ cloud-exchange pipeline: sequencer, FancyPQ burst, sharded matchers, fair MD.

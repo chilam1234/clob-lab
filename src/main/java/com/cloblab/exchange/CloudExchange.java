@@ -21,7 +21,7 @@ public final class CloudExchange {
     private final PriorityIngress priorityIngress;
     private final ExchangeRouter router;
     private final FairMarketDataPublisher marketData;
-    private final EventJournal journal = new EventJournal();
+    private final EventJournal aggregateJournal = new EventJournal();
     private final List<SequencedCommand> ingressBatch = new ArrayList<>();
 
     public CloudExchange(int symbolCount, int ringCapacityPerShard, int burstThreshold) {
@@ -29,7 +29,7 @@ public final class CloudExchange {
         this.marketData = new FairMarketDataPublisher();
         SymbolShard[] shards = new SymbolShard[symbolCount];
         for (int i = 0; i < symbolCount; i++) {
-            shards[i] = new SymbolShard(i, ringCapacityPerShard, marketData);
+            shards[i] = new SymbolShard(i, ringCapacityPerShard, marketData, aggregateJournal);
         }
         this.router = new ExchangeRouter(shards);
     }
@@ -43,7 +43,7 @@ public final class CloudExchange {
     }
 
     public EventJournal journal() {
-        return journal;
+        return aggregateJournal;
     }
 
     public Sequencer sequencer() {
@@ -57,7 +57,6 @@ public final class CloudExchange {
      */
     public boolean submit(InboundCommand command) {
         SequencedCommand sequenced = sequencer.stamp(command);
-        recordJournal(command);
         ingressBatch.add(sequenced);
         return true;
     }
@@ -100,23 +99,6 @@ public final class CloudExchange {
         ingressBatch.addAll(deferred);
         var release = marketData.flush();
         return new ExchangeTick(routed, processed, deferred.size(), release);
-    }
-
-    private void recordJournal(InboundCommand command) {
-        switch (command.kind()) {
-            case SUBMIT -> {
-                switch (command.orderType()) {
-                    case LIMIT -> journal.nextSubmitLimit(
-                            command.orderId(), command.side(), command.priceTicks(), command.quantity());
-                    case MARKET -> journal.nextSubmitMarket(command.orderId(), command.side(), command.quantity());
-                    case IOC -> journal.nextSubmitIoc(
-                            command.orderId(), command.side(), command.priceTicks(), command.quantity());
-                    case FOK -> journal.nextSubmitFok(
-                            command.orderId(), command.side(), command.priceTicks(), command.quantity());
-                }
-            }
-            case CANCEL -> journal.nextCancel(command.orderId());
-        }
     }
 
     public record ExchangeTick(

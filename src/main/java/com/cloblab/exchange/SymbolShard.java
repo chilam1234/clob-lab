@@ -1,6 +1,8 @@
 package com.cloblab.exchange;
 
 import com.cloblab.engine.MatchingEngine;
+import com.cloblab.journal.EventJournal;
+import com.cloblab.journal.OrderEvent;
 import com.cloblab.marketdata.FairMarketDataPublisher;
 import com.cloblab.marketdata.L2Snapshot;
 import com.cloblab.model.MatchResult;
@@ -17,12 +19,14 @@ public final class SymbolShard {
     private final MatchingEngine engine;
     private final RingBuffer<SequencedCommand> inboundRing;
     private final FairMarketDataPublisher publisher;
+    private final EventJournal journal;
 
-    public SymbolShard(int symbolId, int ringCapacity, FairMarketDataPublisher publisher) {
+    public SymbolShard(int symbolId, int ringCapacity, FairMarketDataPublisher publisher, EventJournal journal) {
         this.symbolId = symbolId;
         this.engine = new MatchingEngine();
         this.inboundRing = new RingBuffer<>(ringCapacity);
         this.publisher = publisher;
+        this.journal = journal;
     }
 
     public int symbolId() {
@@ -53,6 +57,7 @@ public final class SymbolShard {
 
     private void apply(SequencedCommand sequenced) {
         InboundCommand command = sequenced.command();
+        journalExecution(sequenced);
         MatchResult result = switch (command.kind()) {
             case SUBMIT -> switch (command.orderType()) {
                 case LIMIT -> engine.submitLimitOrder(
@@ -75,5 +80,28 @@ public final class SymbolShard {
 
     public L2Snapshot snapshot(int depth) {
         return engine.snapshot(depth);
+    }
+
+    /**
+     * Journal at execution time using the global ingress sequence as the event ID so a
+     * replayer can restore execution order even though FancyPQ reordered the batch.
+     */
+    private void journalExecution(SequencedCommand sequenced) {
+        InboundCommand command = sequenced.command();
+        long eventId = sequenced.globalSequence();
+        OrderEvent event = switch (command.kind()) {
+            case SUBMIT -> switch (command.orderType()) {
+                case LIMIT -> OrderEvent.submitLimit(eventId, command.orderId(),
+                        command.side(), command.priceTicks(), command.quantity());
+                case MARKET -> OrderEvent.submitMarket(eventId, command.orderId(),
+                        command.side(), command.quantity());
+                case IOC -> OrderEvent.submitIoc(eventId, command.orderId(),
+                        command.side(), command.priceTicks(), command.quantity());
+                case FOK -> OrderEvent.submitFok(eventId, command.orderId(),
+                        command.side(), command.priceTicks(), command.quantity());
+            };
+            case CANCEL -> OrderEvent.cancel(eventId, command.orderId());
+        };
+        journal.append(event);
     }
 }

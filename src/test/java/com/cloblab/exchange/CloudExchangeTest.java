@@ -69,6 +69,29 @@ class CloudExchangeTest {
     }
 
     @Test
+    void replayMatchesLiveBookThroughReorderAndDeferral() {
+        CloudExchange exchange = new CloudExchange(1, 2, 2);
+        exchange.submit(InboundCommand.submitLimit(0, 1, Side.SELL, 101, 1));
+        exchange.submit(InboundCommand.submitLimit(0, 2, Side.BUY, 99, 10));
+        exchange.flushBatch();
+
+        // Burst triggers FancyPQ reorder + ring deferral, so execution order != ingress order.
+        exchange.submit(InboundCommand.submitLimit(0, 10, Side.SELL, 105, 1));
+        exchange.submit(InboundCommand.submitLimit(0, 11, Side.BUY, 101, 1));
+        exchange.submit(InboundCommand.submitLimit(0, 12, Side.SELL, 98, 1));
+        exchange.flushBatch();
+
+        var live = exchange.router().shard(0).engine().book();
+        var replayed = com.cloblab.journal.EventReplayer.replay(exchange.journal().events()).book();
+
+        assertEquals(live.bestBid(), replayed.bestBid(), "bestBid diverged after replay");
+        assertEquals(live.bestAsk(), replayed.bestAsk(), "bestAsk diverged after replay");
+        assertEquals(live.totalBidQuantity(), replayed.totalBidQuantity(), "bid qty diverged after replay");
+        assertEquals(live.totalAskQuantity(), replayed.totalAskQuantity(), "ask qty diverged after replay");
+        assertEquals(live.snapshot(5), replayed.snapshot(5));
+    }
+
+    @Test
     void priorityScoreCloserToMidIsHigher() {
         CloudExchange exchange = new CloudExchange(1, 64, 10);
         exchange.submit(InboundCommand.submitLimit(0, 1, Side.SELL, 101, 5));
