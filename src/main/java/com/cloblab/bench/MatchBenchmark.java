@@ -21,14 +21,14 @@ public final class MatchBenchmark {
         }
 
         for (int i = 0; i < WARMUP; i++) {
-            long orderId = 10_000 + i;
+            long orderId = 10_000L + i;
             engine.submitLimitOrder(orderId, Side.BUY, 105, 1);
             engine.cancel(orderId);
         }
 
         LatencyRecorder recorder = new LatencyRecorder(SAMPLES);
         for (int i = 0; i < SAMPLES; i++) {
-            long orderId = 100_000 + i;
+            long orderId = 100_000L + i;
             long start = System.nanoTime();
             engine.submitLimitOrder(orderId, Side.BUY, 105, 1);
             long elapsed = System.nanoTime() - start;

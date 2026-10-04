@@ -2,6 +2,8 @@ plugins {
     java
     application
     id("me.champeau.jmh") version "0.7.2"
+    jacoco
+    id("net.ltgt.errorprone") version "4.1.0"
 }
 
 group = "com.cloblab"
@@ -21,12 +23,44 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
 
+    errorprone("com.google.errorprone:error_prone_core:2.36.0")
+
     jmh("org.openjdk.jmh:jmh-core:1.37")
     jmhAnnotationProcessor("org.openjdk.jmh:jmh-generator-annprocess:1.37")
 }
 
 tasks.test {
     useJUnitPlatform()
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+jacoco {
+    toolVersion = "0.8.12"
+}
+
+tasks.jacocoTestReport {
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+}
+
+tasks.jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                counter = "INSTRUCTION"
+                minimum = "0.60".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.addAll(listOf(
+        "-Xlint:all",
+        "-Xlint:-serial,-processing"
+    ))
 }
 
 application {

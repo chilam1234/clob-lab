@@ -25,6 +25,9 @@ public final class LatencyRecorder {
     }
 
     public void merge(LatencyRecorder other) {
+        if (other == this) {
+            throw new IllegalArgumentException("cannot merge a recorder into itself (unbounded growth)");
+        }
         for (int i = 0; i < other.count; i++) {
             record(other.samples[i]);
         }

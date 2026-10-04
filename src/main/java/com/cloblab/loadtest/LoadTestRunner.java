@@ -94,7 +94,7 @@ public final class LoadTestRunner {
             if (!contended) {
                 seed(engine, threadIndex);
             }
-            pool.submit(() -> {
+            var unused = pool.submit(() -> {
                 Worker worker = new Worker(engine, lock, perThreadOps[threadIndex], contended);
                 try {
                     start.await();
@@ -104,6 +104,7 @@ public final class LoadTestRunner {
                     Thread.currentThread().interrupt();
                 }
             });
+            assert unused != null; // latch/shutdown below handle completion; future can't complete before awaitTermination
         }
 
         start.countDown();
@@ -130,7 +131,7 @@ public final class LoadTestRunner {
     }
 
     private static void seed(MatchingEngine engine, int symbolOffset) {
-        long base = 100 + symbolOffset * 10;
+        long base = 100L + symbolOffset * 10L;
         for (long i = 1; i <= 500; i++) {
             long askPrice = base + (i % 5);
             long bidPrice = base - 1 - (i % 5);
