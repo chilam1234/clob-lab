@@ -1,0 +1,2181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>clob-lab — CLOB & Low-Latency Trading Guide</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface2: #243044;
+      --text: #e7ecf3;
+      --muted: #9aa8bc;
+      --accent: #5eb1ff;
+      --green: #3dd68c;
+      --red: #ff6b7a;
+      --yellow: #ffd166;
+      --border: #334155;
+      --code-bg: #0d1117;
+      --font: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "SF Mono", "Fira Code", "Consolas", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 16px;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f1419 60%);
+      border-bottom: 1px solid var(--border);
+      padding: 3rem 1.5rem 2.5rem;
+    }
+
+    header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+
+    header p {
+      color: var(--muted);
+      max-width: 52rem;
+      font-size: 1.05rem;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1.25rem;
+    }
+
+    .badge {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.25rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--accent);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(15, 20, 25, 0.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: 0.5rem 1rem;
+    }
+
+    nav ul {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.65rem;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    nav li {
+      display: flex;
+    }
+
+    nav li.nav-sep {
+      display: block;
+      width: 1px;
+      height: 1rem;
+      background: var(--border);
+      margin: 0 0.1rem;
+      align-self: center;
+      padding: 0;
+    }
+
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.8125rem;
+      line-height: 1.3;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      white-space: nowrap;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+      background: rgba(94, 177, 255, 0.08);
+    }
+
+    @media (max-width: 600px) {
+      nav ul { gap: 0.25rem 0.4rem; }
+      nav a { font-size: 0.75rem; padding: 0.2rem 0.4rem; }
+      nav li.nav-sep { display: none; }
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    section {
+      margin-bottom: 3.5rem;
+      scroll-margin-top: 6rem;
+    }
+
+    h2 {
+      font-size: 1.6rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    h3 {
+      font-size: 1.15rem;
+      margin: 1.75rem 0 0.75rem;
+      color: var(--accent);
+    }
+
+    p { margin-bottom: 1rem; color: #cdd6e3; }
+
+    ul, ol {
+      margin: 0 0 1rem 1.25rem;
+      color: #cdd6e3;
+    }
+
+    li { margin-bottom: 0.4rem; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin: 1.25rem 0;
+    }
+
+    .card.highlight {
+      border-color: #3b6ea5;
+      background: linear-gradient(180deg, #1a2a3f 0%, var(--surface) 100%);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.65rem 0.85rem;
+      text-align: left;
+    }
+
+    th {
+      background: var(--surface2);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+    code {
+      font-family: var(--mono);
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.35rem;
+      font-size: 0.88em;
+      color: #b3d9ff;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.55;
+      color: #c9d1d9;
+    }
+
+    .book-visual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin: 1.25rem 0;
+    }
+
+    .book-side {
+      background: var(--surface);
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .book-side h4 {
+      padding: 0.6rem 1rem;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .book-side.bids h4 { background: rgba(61, 214, 140, 0.15); color: var(--green); }
+    .book-side.asks h4 { background: rgba(255, 107, 122, 0.15); color: var(--red); }
+
+    .level {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.45rem 1rem;
+      border-top: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+
+    .level.best { background: rgba(94, 177, 255, 0.1); font-weight: 600; }
+
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 1rem 0;
+    }
+
+    .flow-step {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.85rem;
+      font-size: 0.85rem;
+    }
+
+    .flow-arrow { color: var(--muted); }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+
+    .compare-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+    }
+
+    .compare-box h4 {
+      margin-bottom: 0.5rem;
+      font-size: 0.95rem;
+    }
+
+    .compare-box.limit h4 { color: var(--accent); }
+    .compare-box.market h4 { color: var(--yellow); }
+    .compare-box.ioc h4 { color: var(--green); }
+
+    .tag {
+      display: inline-block;
+      font-size: 0.75rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      margin-right: 0.35rem;
+    }
+
+    .tag.yes { background: rgba(61,214,140,0.2); color: var(--green); }
+    .tag.no { background: rgba(255,107,122,0.2); color: var(--red); }
+    .tag.warn { background: rgba(255,209,102,0.2); color: var(--yellow); }
+    .tag.info { background: rgba(94,177,255,0.18); color: var(--accent); }
+
+    /* Data-structure diagrams (§2b) */
+    .ds-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin: 1.25rem 0;
+    }
+
+    .ds-layer {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      position: relative;
+    }
+
+    .ds-layer-label {
+      position: absolute;
+      top: -0.6rem;
+      left: 1rem;
+      background: var(--bg);
+      padding: 0 0.5rem;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+    }
+
+    .treemap-row, .array-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: stretch;
+      margin: 0.75rem 0;
+    }
+
+    .tm-node {
+      background: var(--surface2);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      min-width: 5.5rem;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      overflow: hidden;
+    }
+
+    .tm-node.best { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(94,177,255,0.3); }
+    .tm-node .tm-price {
+      padding: 0.35rem 0.5rem;
+      background: rgba(94,177,255,0.12);
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .tm-node.ask .tm-price { background: rgba(255,107,122,0.15); color: var(--red); }
+    .tm-node.bid .tm-price { background: rgba(61,214,140,0.15); color: var(--green); }
+    .tm-node .tm-body { padding: 0.4rem 0.5rem; color: var(--muted); font-size: 0.75rem; }
+
+    .arr-slot {
+      flex: 0 0 auto;
+      width: 2.4rem;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+    }
+
+    .arr-slot .arr-idx { color: var(--muted); font-size: 0.65rem; }
+    .arr-slot .arr-cell {
+      height: 2.5rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--code-bg);
+      margin-top: 0.2rem;
+    }
+
+    .arr-slot.active .arr-cell {
+      background: rgba(94,177,255,0.15);
+      border-color: var(--accent);
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .arr-slot.empty .arr-cell { opacity: 0.35; }
+
+    .arr-pointer {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--yellow);
+      margin: 0.5rem 0 0;
+    }
+
+    .ll-chain {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+      margin: 0.75rem 0;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+
+    .ll-node {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.65rem;
+      min-width: 5rem;
+      text-align: center;
+    }
+
+    .ll-node.head { border-color: var(--green); }
+    .ll-node.tail { border-color: var(--yellow); }
+    .ll-node .ll-slot { color: var(--muted); font-size: 0.65rem; }
+    .ll-node .ll-id { color: var(--text); font-weight: 600; }
+    .ll-node .ll-qty { color: var(--accent); }
+    .ll-arrow { color: var(--muted); font-size: 1rem; }
+
+    .pool-viz {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 1rem;
+      align-items: start;
+      margin: 1rem 0;
+    }
+
+    @media (max-width: 700px) {
+      .pool-viz { grid-template-columns: 1fr; }
+    }
+
+    .pool-box {
+      background: var(--code-bg);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+    }
+
+    .pool-box h5 {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+      font-family: var(--font);
+    }
+
+    .pool-slot {
+      display: inline-block;
+      width: 1.6rem;
+      height: 1.6rem;
+      line-height: 1.6rem;
+      text-align: center;
+      border-radius: 4px;
+      margin: 0.15rem;
+      font-size: 0.7rem;
+    }
+
+    .pool-slot.used { background: rgba(94,177,255,0.25); color: var(--accent); }
+    .pool-slot.free { background: rgba(61,214,140,0.15); color: var(--green); }
+
+    .match-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin: 1rem 0;
+    }
+
+    .match-step {
+      display: grid;
+      grid-template-columns: 2rem 1fr;
+      gap: 0.75rem;
+      align-items: start;
+    }
+
+    .match-step-num {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .match-step-body {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      font-size: 0.9rem;
+    }
+
+    .arch-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+
+    @media (max-width: 700px) {
+      .arch-compare { grid-template-columns: 1fr; }
+    }
+
+    .arch-col {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+    }
+
+    .arch-col h4 {
+      font-size: 0.95rem;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .arch-col.tree h4 { color: var(--yellow); }
+    .arch-col.fast h4 { color: var(--accent); }
+
+    .pipe-stack {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      margin: 1rem 0;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      line-height: 1.5;
+      color: var(--muted);
+      overflow-x: auto;
+    }
+
+    .pipe-stack .pipe-step {
+      color: var(--text);
+      padding: 0.35rem 0;
+      border-left: 2px solid var(--accent);
+      padding-left: 0.75rem;
+      margin-left: 0.25rem;
+    }
+
+    .pipe-stack .pipe-step.highlight {
+      border-left-color: var(--green);
+      color: var(--green);
+    }
+
+    .shard-fanout {
+      margin: 1.25rem 0;
+      text-align: center;
+    }
+
+    .router-node {
+      display: inline-block;
+      background: var(--surface2);
+      border: 2px solid var(--accent);
+      border-radius: 10px;
+      padding: 0.6rem 1.25rem;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--accent);
+      margin-bottom: 0.75rem;
+    }
+
+    .shard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+      gap: 0.5rem;
+      max-width: 42rem;
+      margin: 0 auto;
+    }
+
+    .shard-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.4rem;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+    }
+
+    .shard-box .shard-id { color: var(--accent); font-weight: 600; font-size: 0.75rem; }
+    .shard-box .shard-detail { color: var(--muted); margin-top: 0.25rem; line-height: 1.35; }
+
+    .fanout-lines {
+      color: var(--border);
+      font-size: 1rem;
+      letter-spacing: 0.2em;
+      margin: 0.25rem 0 0.5rem;
+    }
+
+    .qa-table td:first-child { color: var(--muted); width: 45%; }
+
+    .ring-flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 1rem 0;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+    }
+
+    .ring-box {
+      flex: 1;
+      min-width: 14rem;
+      background: var(--surface);
+      border: 2px dashed var(--accent);
+      border-radius: 10px;
+      padding: 0.75rem;
+    }
+
+    .ring-box h5 {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+      font-family: var(--font);
+    }
+
+    .ring-slots {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+
+    .ring-slot {
+      width: 2.5rem;
+      height: 2.5rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--code-bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+
+    .ring-slot.filled {
+      border-color: var(--green);
+      background: rgba(61, 214, 140, 0.12);
+      color: var(--green);
+    }
+
+    .ring-slot .rs-seq { font-weight: 600; font-size: 0.7rem; }
+
+    .ring-arrow {
+      color: var(--yellow);
+      font-size: 1.25rem;
+      flex-shrink: 0;
+    }
+
+    .learn-step {
+      display: grid;
+      grid-template-columns: 2.4rem 1fr;
+      gap: 0.85rem;
+      align-items: start;
+      margin: 0.85rem 0;
+    }
+
+    .learn-num {
+      width: 2.4rem;
+      height: 2.4rem;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 0.9rem;
+    }
+
+    .learn-body {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+    }
+
+    .learn-body h4 {
+      font-size: 0.95rem;
+      margin-bottom: 0.35rem;
+      color: var(--text);
+    }
+
+    .learn-body p:last-child { margin-bottom: 0; }
+
+    footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+
+    @media (max-width: 600px) {
+      .book-visual { grid-template-columns: 1fr; }
+      header h1 { font-size: 1.6rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>CLOB & Low-Latency Trading</h1>
+  <p>
+    A visual guide to the <strong>clob-lab</strong> project — how a Central Limit Order Book matches orders,
+    what limit / market / IOC mean, how event journaling works, and how Java is used in low-latency trading.
+  </p>
+  <div class="badge-row">
+    <span class="badge">Java 21</span>
+    <span class="badge">Price–Time Priority</span>
+    <span class="badge">Limit · Market · IOC · FOK</span>
+    <span class="badge">L2 Snapshots</span>
+    <span class="badge">Event Journal + Replay</span>
+    <span class="badge">JMH Benchmarks</span>
+    <span class="badge">Cloud Pipeline (2024+)</span>
+  </div>
+</header>
+
+<nav>
+  <ul>
+    <li><a href="#clob">CLOB</a></li>
+    <li><a href="#matching">Matching</a></li>
+    <li><a href="#datastructures">Structures</a></li>
+    <li class="nav-sep" aria-hidden="true"></li>
+    <li><a href="#limit">Limit</a></li>
+    <li><a href="#market">Market</a></li>
+    <li><a href="#ioc">IOC</a></li>
+    <li><a href="#fok">FOK</a></li>
+    <li><a href="#l2">L2</a></li>
+    <li class="nav-sep" aria-hidden="true"></li>
+    <li><a href="#journal">Journal</a></li>
+    <li><a href="#fastbook">Fast book</a></li>
+    <li><a href="#pipeline">Pipeline</a></li>
+    <li><a href="#ring">Ring</a></li>
+    <li><a href="#industry">Industry</a></li>
+    <li class="nav-sep" aria-hidden="true"></li>
+    <li><a href="#jmh">JMH</a></li>
+    <li><a href="#loadtest">Load test</a></li>
+    <li><a href="#research">Research</a></li>
+    <li><a href="#latency">Latency</a></li>
+    <li class="nav-sep" aria-hidden="true"></li>
+    <li><a href="#learn">Learn</a></li>
+    <li><a href="#refactor">Refactor</a></li>
+    <li><a href="#run">Run</a></li>
+    <li><a href="#code">Code</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="clob">
+  <h2>1. What is a CLOB?</h2>
+  <p>
+    A <strong>Central Limit Order Book (CLOB)</strong> is the core data structure of most equity and crypto exchanges.
+    It holds all resting (passive) buy and sell orders for one instrument, sorted so the matching engine always
+    knows who to trade with next.
+  </p>
+
+  <div class="book-visual">
+    <div class="book-side bids">
+      <h4>Bids (buyers)</h4>
+      <div class="level best"><span>100</span><span>× 15</span></div>
+      <div class="level"><span>99</span><span>× 30</span></div>
+      <div class="level"><span>98</span><span>× 40</span></div>
+    </div>
+    <div class="book-side asks">
+      <h4>Asks (sellers)</h4>
+      <div class="level best"><span>100</span><span>× 20</span></div>
+      <div class="level"><span>101</span><span>× 50</span></div>
+      <div class="level"><span>102</span><span>× 10</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>Sorting rules</strong>
+    <ul>
+      <li><strong>Bids</strong> — highest price first (best bid at top)</li>
+      <li><strong>Asks</strong> — lowest price first (best ask at top)</li>
+      <li><strong>Spread</strong> — gap between best bid and best ask (here: 100 vs 100 → zero spread, locked market)</li>
+    </ul>
+  </div>
+
+  <h3>Price–time priority</h3>
+  <p>When an aggressive order arrives, the engine matches using two rules:</p>
+  <ol>
+    <li><strong>Price priority</strong> — take the best price on the opposite side first</li>
+    <li><strong>Time priority</strong> — at the same price, the oldest order fills first (FIFO queue)</li>
+  </ol>
+</section>
+
+<section id="matching">
+  <h2>2. The matching loop</h2>
+  <p>
+    In <code>OrderBook.matchAggressive()</code>, an incoming taker order walks the opposite side of the book
+    until it is fully filled or can no longer cross the limit price.
+  </p>
+
+  <div class="flow">
+    <span class="flow-step">Incoming order</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Crosses best price?</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Fill FIFO at level</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">More qty left?</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Rest or cancel remainder</span>
+  </div>
+
+  <pre>// Simplified matching logic (OrderBook.java)
+while (remaining > 0 && opposite side has liquidity) {
+    bestPrice = opposite.firstEntry()
+    if (!priceCrosses(takerLimit, bestPrice)) break
+
+    while (remaining > 0 && level not empty) {
+        maker = level.peekFirst()          // oldest at this price
+        fillQty = min(remaining, maker.qty)
+        emit trade
+        update or remove maker
+    }
+}
+return remaining</pre>
+
+  <p>See <a href="#datastructures">§2b Matching data structures</a> for TreeMap vs array/pool diagrams.</p>
+
+  <h3>Example: limit buy crosses the ask</h3>
+  <p>Book: asks at 100×20 and 101×50. Submit <code>BUY 25 @ 100</code>:</p>
+  <table>
+    <thead>
+      <tr><th>Step</th><th>Action</th><th>Remaining taker qty</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>Fill 20 from ask @ 100 (oldest maker)</td><td>5</td></tr>
+      <tr><td>2</td><td>Limit 100 cannot cross ask @ 101 → stop</td><td>5</td></tr>
+      <tr><td>3</td><td>Rest 5 as bid @ 100 (limit order behavior)</td><td>0 resting logic</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="datastructures">
+  <h2>2b. Matching data structures</h2>
+  <p>
+    The matching <em>rules</em> are the same everywhere — price-time priority, FIFO within a level.
+    What changes is the <strong>containers</strong> underneath: how you find the best price, store orders,
+    and update the book without allocating on the hot path.
+  </p>
+
+  <p>
+    Both implementations expose the same API via <code>OrderBookView</code>. <code>MatchingEngine</code> calls
+    <code>matchAggressive()</code> first, then optionally <code>addRestingOrder()</code> for limit remainders.
+  </p>
+
+  <h3>Three layers</h3>
+  <div class="ds-stack">
+    <div class="ds-layer">
+      <span class="ds-layer-label">Layer 1 — Price levels</span>
+      <p><strong>Question:</strong> “What prices exist, and which is best?”</p>
+      <p style="margin-top:0.5rem;color:var(--muted);font-size:0.9rem;">
+        Tree book: two <code>TreeMap</code>s (sorted). Fast book: two <code>FastLevel[]</code> arrays indexed by tick + cached best bid/ask.
+      </p>
+    </div>
+    <div class="ds-layer">
+      <span class="ds-layer-label">Layer 2 — Orders at a level</span>
+      <p><strong>Question:</strong> “Who’s first in line at this price?”</p>
+      <p style="margin-top:0.5rem;color:var(--muted);font-size:0.9rem;">
+        Tree book: <code>ArrayDeque&lt;Order&gt;</code> FIFO. Fast book: intrusive doubly-linked list of pooled nodes.
+      </p>
+    </div>
+    <div class="ds-layer">
+      <span class="ds-layer-label">Layer 3 — Order index</span>
+      <p><strong>Question:</strong> “Given orderId, how do I cancel?”</p>
+      <p style="margin-top:0.5rem;color:var(--muted);font-size:0.9rem;">
+        Tree: <code>orderId → (side, price)</code> then scan deque. Fast: <code>orderId → pool slot</code> then O(1) unlink.
+      </p>
+    </div>
+  </div>
+
+  <h3>Layer 1 — Price levels illustrated</h3>
+
+  <div class="arch-compare">
+    <div class="arch-col tree">
+      <h4>OrderBook (TREE)</h4>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem;">Asks: natural sort → best = lowest key</p>
+      <div class="treemap-row">
+        <div class="tm-node ask best">
+          <div class="tm-price">100</div>
+          <div class="tm-body">PriceLevel<br>qty 20</div>
+        </div>
+        <div class="tm-node ask">
+          <div class="tm-price">101</div>
+          <div class="tm-body">PriceLevel<br>qty 50</div>
+        </div>
+        <div class="tm-node ask">
+          <div class="tm-price">102</div>
+          <div class="tm-body">PriceLevel<br>qty 10</div>
+        </div>
+      </div>
+      <p style="font-size:0.8rem;color:var(--muted);">
+        <code>asks.firstKey()</code> → 100 &nbsp;|&nbsp; insert new price: O(log N)
+      </p>
+      <p style="font-size:0.85rem;color:var(--muted);margin-top:0.75rem;margin-bottom:0.5rem;">Bids: reverse sort → best = highest key</p>
+      <div class="treemap-row">
+        <div class="tm-node bid best">
+          <div class="tm-price">99</div>
+          <div class="tm-body">PriceLevel<br>qty 40</div>
+        </div>
+        <div class="tm-node bid">
+          <div class="tm-price">98</div>
+          <div class="tm-body">PriceLevel<br>qty 25</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arch-col fast">
+      <h4>FastOrderBook (FAST)</h4>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem;">Asks array: index = price − tickBase</p>
+      <div class="array-row">
+        <div class="arr-slot"><div class="arr-idx">98</div><div class="arr-cell">·</div></div>
+        <div class="arr-slot"><div class="arr-idx">99</div><div class="arr-cell">·</div></div>
+        <div class="arr-slot active"><div class="arr-idx">100</div><div class="arr-cell">20</div></div>
+        <div class="arr-slot active"><div class="arr-idx">101</div><div class="arr-cell">50</div></div>
+        <div class="arr-slot active"><div class="arr-idx">102</div><div class="arr-cell">10</div></div>
+        <div class="arr-slot empty"><div class="arr-idx">103</div><div class="arr-cell">·</div></div>
+      </div>
+      <p class="arr-pointer">bestAskTick = 100 &nbsp;→&nbsp; O(1) lookup: asks[100 − base]</p>
+      <p style="font-size:0.8rem;color:var(--muted);">
+        When tick 100 empties: <code>advanceBestAsk()</code> scans 101, 102… until non-empty level
+      </p>
+    </div>
+  </div>
+
+  <h3>Layer 2 — FIFO queue at one price</h3>
+  <p>At price <strong>100</strong>, three resting sell orders arrived in order. The matcher always takes from the <strong>head</strong> (oldest first).</p>
+
+  <div class="arch-compare">
+    <div class="arch-col tree">
+      <h4>Tree — ArrayDeque</h4>
+      <div class="ll-chain">
+        <div class="ll-node head"><div class="ll-slot">front</div><div class="ll-id">#42</div><div class="ll-qty">× 5</div></div>
+        <span class="ll-arrow">→</span>
+        <div class="ll-node"><div class="ll-slot">&nbsp;</div><div class="ll-id">#88</div><div class="ll-qty">× 10</div></div>
+        <span class="ll-arrow">→</span>
+        <div class="ll-node tail"><div class="ll-slot">back</div><div class="ll-id">#15</div><div class="ll-qty">× 3</div></div>
+      </div>
+      <p style="font-size:0.85rem;color:var(--muted);">
+        Match: <code>peekFirst()</code> / <code>removeFirst()</code><br>
+        Partial fill: replaces front with new <code>Order</code> record (allocates)
+      </p>
+    </div>
+
+    <div class="arch-col fast">
+      <h4>Fast — Pooled intrusive list</h4>
+      <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.5rem;">FastLevel @ tick 100: head=3, tail=1, totalQty=18</p>
+      <div class="ll-chain">
+        <div class="ll-node head"><div class="ll-slot">slot 3</div><div class="ll-id">#42</div><div class="ll-qty">× 5</div></div>
+        <span class="ll-arrow">↔</span>
+        <div class="ll-node"><div class="ll-slot">slot 7</div><div class="ll-id">#88</div><div class="ll-qty">× 10</div></div>
+        <span class="ll-arrow">↔</span>
+        <div class="ll-node tail"><div class="ll-slot">slot 1</div><div class="ll-id">#15</div><div class="ll-qty">× 3</div></div>
+      </div>
+      <p style="font-size:0.85rem;color:var(--muted);">
+        Match: decrement <code>PooledOrder.quantity</code> in place<br>
+        Full fill: <code>popHead()</code> + <code>pool.release(slot)</code> — no <code>new</code>
+      </p>
+    </div>
+  </div>
+
+  <h3>Order pool</h3>
+  <p>
+    <code>OrderPool</code> pre-allocates a fixed array of <code>PooledOrder</code> nodes. A free-stack recycles slots.
+    The match loop never calls <code>new</code> — it acquires on add, releases on fill/cancel.
+  </p>
+
+  <div class="pool-viz">
+    <div class="pool-box">
+      <h5>OrderPool (524,288 slots)</h5>
+      <span class="pool-slot used">3</span>
+      <span class="pool-slot used">7</span>
+      <span class="pool-slot used">1</span>
+      <span class="pool-slot free">·</span>
+      <span class="pool-slot free">·</span>
+      <span class="pool-slot free">·</span>
+      <span style="color:var(--muted);"> … </span>
+      <p style="margin-top:0.5rem;color:var(--muted);">Used slots hold live orders. Free slots on stack for reuse.</p>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:0.85rem;">
+      orderIndex<br>↓<br><code>{ 42→3, 88→7, 15→1 }</code>
+    </div>
+    <div class="pool-box">
+      <h5>PooledOrder node (slot 3)</h5>
+      <pre style="margin:0;font-size:0.72rem;background:transparent;border:none;padding:0;">orderId = 42
+quantity = 5
+prev = -1  (head)
+next = 7
+levelIndex = 100</pre>
+    </div>
+  </div>
+
+  <h3>Walkthrough: BUY 20 @ 101</h3>
+  <p>Starting book — aggressive buy walks asks from best (lowest) upward:</p>
+
+  <div class="book-visual" style="margin-bottom:1rem;">
+    <div class="book-side bids">
+      <h4>Bids</h4>
+      <div class="level"><span>99</span><span>× …</span></div>
+    </div>
+    <div class="book-side asks">
+      <h4>Asks (match target)</h4>
+      <div class="level best"><span>100</span><span>× 15 (id 1, 2)</span></div>
+      <div class="level"><span>101</span><span>× 50 (id 3)</span></div>
+    </div>
+  </div>
+
+  <div class="match-steps">
+    <div class="match-step">
+      <div class="match-step-num">1</div>
+      <div class="match-step-body">
+        <strong>Cross tick 100?</strong> Limit 101 ≥ 100 ✓ — enter level @ 100, fill FIFO from head.<br>
+        Trade: id=1, 10 @ 100 → remaining taker = 10
+      </div>
+    </div>
+    <div class="match-step">
+      <div class="match-step-num">2</div>
+      <div class="match-step-body">
+        Trade: id=2, 5 @ 100 → remaining taker = 5. Level 100 empty → <code>advanceBestAsk()</code> → bestAsk = 101
+      </div>
+    </div>
+    <div class="match-step">
+      <div class="match-step-num">3</div>
+      <div class="match-step-body">
+        <strong>Cross tick 101?</strong> 101 ≥ 101 ✓ — fill id=3 for 5 @ 101 → remaining = 0. id=3 still has 45 resting.
+      </div>
+    </div>
+    <div class="match-step">
+      <div class="match-step-num">✓</div>
+      <div class="match-step-body">
+        <strong>Result:</strong> 3 trades, fully filled. FAST path: 2× <code>pool.release</code>, 1× partial qty update, 1× best-ask advance. Same logic in TREE — different containers.
+      </div>
+    </div>
+  </div>
+
+  <h3>Side-by-side summary</h3>
+  <table>
+    <thead>
+      <tr><th>Operation</th><th>OrderBook (TREE)</th><th>FastOrderBook (FAST)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Best bid/ask</td><td><code>TreeMap.firstKey()</code> O(log N)</td><td>Cached tick O(1)</td></tr>
+      <tr><td>Level lookup</td><td><code>TreeMap.get(price)</code></td><td><code>array[price − base]</code> O(1)</td></tr>
+      <tr><td>Add resting order</td><td><code>ArrayDeque.addLast</code></td><td><code>pool.acquire</code> + link at tail</td></tr>
+      <tr><td>Match (full fill)</td><td><code>removeFirst()</code></td><td><code>popHead</code> + <code>release</code></td></tr>
+      <tr><td>Match (partial)</td><td>New <code>Order</code> record</td><td>Decrement qty in place</td></tr>
+      <tr><td>Cancel</td><td>Scan deque at level</td><td>Unlink by slot O(1)</td></tr>
+      <tr><td>Memory</td><td>Only used prices allocated</td><td>Pre-alloc tickSpan + pool</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card highlight">
+    <strong>Production goes further</strong>
+    <ul>
+      <li>Off-heap books (Chronicle) — zero GC on hot path</li>
+      <li>Dense orderId → slot (no HashMap on match/cancel)</li>
+      <li>Single writer thread per symbol — never share one book across threads</li>
+      <li>Ring buffers between pipeline stages (see <a href="#pipeline">§13 Pipeline</a>)</li>
+    </ul>
+  </div>
+
+  <pre>MatchingEngine fast = new MatchingEngine();                         // FastOrderBook
+MatchingEngine tree = MatchingEngine.create(BookKind.TREE);       // OrderBook
+
+// Same rules — OrderBookEquivalenceTest verifies identical final state</pre>
+</section>
+
+<section id="limit">
+  <h2>3. Limit orders</h2>
+  <p>
+    A <strong>limit order</strong> says: “Buy/sell up to <em>qty</em> units, but only at this price or better.”
+    Unfilled quantity <strong>rests on the book</strong> as passive liquidity.
+  </p>
+
+  <div class="compare-box limit">
+    <h4>Limit order</h4>
+    <p><span class="tag yes">Rests</span> unfilled quantity stays on book</p>
+    <p><span class="tag yes">Price protection</span> won't pay more (buy) or sell cheaper (sell) than limit</p>
+    <p>API: <code>submitLimitOrder(id, side, priceTicks, qty)</code></p>
+  </div>
+
+  <pre>engine.submitLimitOrder(5, Side.BUY, 100, 25);
+// MatchResult: trades=[...], remainingQuantity=5, resting=true</pre>
+</section>
+
+<section id="market">
+  <h2>4. Market orders</h2>
+  <p>
+    A <strong>market order</strong> says: “Fill me now at whatever prices are available.”
+    It has <strong>no price cap</strong> (in this toy engine: <code>Long.MAX_VALUE</code> for buys,
+    <code>Long.MIN_VALUE</code> for sells).
+  </p>
+
+  <div class="compare-box market">
+    <h4>Market order</h4>
+    <p><span class="tag no">Never rests</span> unfilled qty is discarded</p>
+    <p><span class="tag no">No price limit</span> walks through multiple price levels</p>
+    <p><span class="tag yes">Immediate</span> takes all available liquidity aggressively</p>
+    <p>API: <code>submitMarketOrder(id, side, qty)</code></p>
+  </div>
+
+  <h3>Example</h3>
+  <p>Asks: 100×15, 101×40. <code>MARKET BUY 30</code>:</p>
+  <table>
+    <thead>
+      <tr><th>Trade</th><th>Price</th><th>Qty</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>100</td><td>15</td></tr>
+      <tr><td>2</td><td>101</td><td>15</td></tr>
+    </tbody>
+  </table>
+  <p>Book after: ask 101×25 remaining. No bid added — market orders never rest.</p>
+
+  <pre>engine.submitMarketOrder(3, Side.BUY, 30);
+// MatchResult: orderType=MARKET, resting=false</pre>
+</section>
+
+<section id="ioc">
+  <h2>5. IOC — Immediate or Cancel</h2>
+  <p>
+    An <strong>IOC (Immediate-or-Cancel)</strong> order combines limit price protection with market-like urgency:
+    match everything you can right now at your limit price, then <strong>cancel any unfilled remainder</strong>.
+    It never rests on the book.
+  </p>
+
+  <div class="compare-box ioc">
+    <h4>IOC order</h4>
+    <p><span class="tag yes">Price limit</span> like a limit order</p>
+    <p><span class="tag no">Never rests</span> leftover qty cancelled immediately</p>
+    <p><span class="tag yes">Partial fill OK</span> common in institutional flow</p>
+    <p>API: <code>submitIocOrder(id, side, priceTicks, qty)</code></p>
+  </div>
+
+  <h3>Limit vs Market vs IOC</h3>
+  <div class="compare-grid">
+    <div class="compare-box limit">
+      <h4>Limit</h4>
+      Price limit ✓<br>Rests ✓<br>Use: provide liquidity
+    </div>
+    <div class="compare-box market">
+      <h4>Market</h4>
+      Price limit ✗<br>Rests ✗<br>Use: urgency, pay the spread
+    </div>
+    <div class="compare-box ioc">
+      <h4>IOC</h4>
+      Price limit ✓<br>Rests ✗<br>Use: take liquidity without leaving an order
+    </div>
+  </div>
+
+  <h3>Example</h3>
+  <p>Ask: 100×10 only. <code>IOC BUY 25 @ 100</code> → fill 10, cancel remaining 15.</p>
+  <pre>engine.submitIocOrder(2, Side.BUY, 100, 25);
+// trades: 1 fill of 10, remainingQuantity=15, resting=false</pre>
+</section>
+
+<section id="fok">
+  <h2>6. FOK — Fill or Kill</h2>
+  <p>
+    A <strong>FOK (Fill-or-Kill)</strong> order is all-or-nothing: it must fill the <em>entire</em> quantity
+    at your limit price (or better) immediately, or the whole order is <strong>rejected</strong> with zero trades.
+    No partial fills. Nothing rests on the book.
+  </p>
+
+  <div class="compare-box ioc">
+    <h4>FOK vs IOC</h4>
+    <p><strong>IOC</strong> — partial fill OK, cancel remainder</p>
+    <p><strong>FOK</strong> — full fill required, otherwise reject everything</p>
+    <p>API: <code>submitFokOrder(id, side, priceTicks, qty)</code></p>
+  </div>
+
+  <h3>How clob-lab implements it</h3>
+  <pre>// 1. Check available liquidity WITHOUT mutating the book
+if (book.availableAtOrBetter(side, limitPrice) &lt; quantity)
+    return rejected;
+
+// 2. Only then match aggressively
+return submit(..., allowRest=false, OrderType.FOK);</pre>
+
+  <h3>Example</h3>
+  <p>Ask: 100×10 only. <code>FOK BUY 25 @ 100</code> → rejected, book unchanged.</p>
+  <p>Same book. <code>FOK BUY 10 @ 100</code> → fills all 10, book ask side empty at 100.</p>
+</section>
+
+<section id="l2">
+  <h2>7. L2 market-data snapshots</h2>
+  <p>
+    <strong>Level 2 (L2)</strong> market data shows aggregated quantity at each price level — what traders see
+    as depth-of-book. Exchanges publish L2 snapshots or incremental updates to subscribers.
+  </p>
+
+  <pre>L2Snapshot (depth=3)
+  ASKS (low → high):
+    101 × 30 (1 orders)
+    100 × 35 (2 orders)
+  --- spread ---
+  BIDS (high → low):
+    99 × 40 (1 orders)
+    98 × 35 (2 orders)</pre>
+
+  <p>API: <code>engine.snapshot(depth)</code> returns <code>L2Snapshot</code> with <code>BookLevel</code> entries:</p>
+  <table>
+    <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>priceTicks</code></td><td>Price level</td></tr>
+      <tr><td><code>quantity</code></td><td>Total size at that level</td></tr>
+      <tr><td><code>orderCount</code></td><td>Number of resting orders (FIFO queue depth)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="journal">
+  <h2>8. Event journal &amp; replay</h2>
+  <p>
+    Production exchanges don't just mutate state — they <strong>append every input to a journal</strong>.
+    That gives you audit trails, crash recovery, and deterministic replay for testing.
+  </p>
+
+  <div class="card highlight">
+    <strong>Why journal?</strong>
+    <ul>
+      <li><strong>Audit</strong> — reconstruct exactly what happened and when</li>
+      <li><strong>Recovery</strong> — rebuild book state after a crash from the log</li>
+      <li><strong>Testing</strong> — replay production events in a dev engine</li>
+      <li><strong>Determinism</strong> — same events → same final book (if matching is deterministic)</li>
+    </ul>
+  </div>
+
+  <h3>How clob-lab does it</h3>
+  <pre>MatchingEngine.Journaled live = new MatchingEngine.Journaled();
+
+live.submitLimitOrder(1, Side.SELL, 100, 30);
+live.submitLimitOrder(2, Side.BUY,  100, 10);
+live.submitIocOrder(3, Side.BUY, 99, 5);
+live.cancel(1);
+
+// Rebuild a fresh engine from the log
+MatchingEngine replayed = live.replay();
+// replayed.book() should equal live.book()</pre>
+
+  <p>Each journal entry is an <code>OrderEvent</code>:</p>
+  <table>
+    <thead>
+      <tr><th>Field</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>eventId</code></td><td>Monotonic sequence in the journal</td></tr>
+      <tr><td><code>kind</code></td><td><code>SUBMIT</code> or <code>CANCEL</code></td></tr>
+      <tr><td><code>orderType</code></td><td><code>LIMIT</code>, <code>MARKET</code>, <code>IOC</code>, or <code>FOK</code></td></tr>
+      <tr><td><code>orderId, side, priceTicks, quantity</code></td><td>Order details (price null for market)</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    <code>EventReplayer.replay()</code> creates a new <code>MatchingEngine</code> and applies events in order —
+    no double-journaling on replay.
+  </p>
+</section>
+
+<section id="jmh">
+  <h2>10. JMH benchmarks</h2>
+  <p>
+    The simple <code>MatchBenchmark</code> uses <code>System.nanoTime()</code> — fine for learning, but
+    <strong>JMH (Java Microbenchmark Harness)</strong> is the standard for serious JVM latency measurement.
+    It handles JVM warmup, dead-code elimination, and forking properly.
+  </p>
+
+  <pre>./gradlew jmh
+# Results: build/reports/jmh/results.txt</pre>
+
+  <p>Benchmarks in <code>MatchEngineBenchmark</code> (FAST book only):</p>
+  <table>
+    <thead><tr><th>Benchmark</th><th>Measures</th></tr></thead>
+    <tbody>
+      <tr><td><code>limitOrderMatch</code></td><td>Submit + cancel limit order on seeded book</td></tr>
+      <tr><td><code>fokOrderFullFill</code></td><td>FOK with liquidity check + match</td></tr>
+      <tr><td><code>l2SnapshotDepth5</code></td><td>Top-5 L2 snapshot generation</td></tr>
+    </tbody>
+  </table>
+
+  <h3>FAST vs TREE (<code>BookKindBenchmark</code>)</h3>
+  <p>
+    Same three benchmarks, parameterized over <code>BookKind.FAST</code> and <code>BookKind.TREE</code>.
+    Numbers below are from a sample run on Apple Silicon / JDK 21 — compare <em>relative</em> scores on your machine, not absolutes.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Benchmark</th><th>FAST (ns/op)</th><th>TREE (ns/op)</th><th>FAST advantage</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>limitOrderMatch</code></td><td>~27</td><td>~44</td><td>~1.7× faster</td></tr>
+      <tr><td><code>fokOrderFullFill</code></td><td>~3</td><td>~4</td><td>~1.3× faster</td></tr>
+      <tr><td><code>l2SnapshotDepth5</code></td><td>~60</td><td>~84</td><td>~1.4× faster</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The match loop gains the most from array tick lookup + order pooling. Snapshot still walks levels but avoids
+    <code>TreeMap</code> iteration overhead. Run <code>./gradlew jmh</code> and open
+    <code>build/reports/jmh/results.txt</code> for your machine.
+  </p>
+
+  <div class="card">
+    <strong>Reading JMH output</strong>
+    <p><code>Score: 842.156 ns/op</code> — average nanoseconds per operation after warmup. Lower is faster.
+    Compare relative scores, not absolute numbers across machines.</p>
+    <p>Look for rows like <code>BookKindBenchmark.limitOrderMatch  FAST</code> vs <code>TREE</code> side by side.</p>
+  </div>
+</section>
+
+<section id="loadtest">
+  <h2>11. Load testing</h2>
+  <p>
+    <strong>Load tests</strong> differ from microbenchmarks: they run a realistic mix of operations
+    continuously for many seconds and report <em>throughput</em> (ops/sec) plus latency percentiles under sustained traffic.
+  </p>
+
+  <pre>./gradlew runLoadTest
+./gradlew runLoadTest --args="--mode=multi --threads=8 --duration=30"</pre>
+
+  <h3>Modes</h3>
+  <table>
+    <thead><tr><th>Mode</th><th>What it measures</th></tr></thead>
+    <tbody>
+      <tr><td><code>single</code></td><td>One thread, one book — peak hot-path throughput</td></tr>
+      <tr><td><code>multi</code></td><td>N threads, N independent books — aggregate multi-symbol throughput</td></tr>
+      <tr><td><code>contended</code></td><td>N threads, one shared book (synchronized) — lock contention stress</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Mode comparison (8 threads, 10s duration, sample run)</h3>
+  <p>
+    These numbers illustrate <em>why mode matters</em>. Throughput and tail latency vary by orders of magnitude —
+    not because the matcher got slower, but because the threading model changed.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Mode</th>
+        <th>Threads</th>
+        <th>Throughput</th>
+        <th>p50 latency</th>
+        <th>p99 latency</th>
+        <th>Interpretation</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>single</code></td>
+        <td>1</td>
+        <td>~13k ops/sec</td>
+        <td>~80 ns</td>
+        <td>spiky (GC)</td>
+        <td>One symbol, mixed workload — realistic per-shard ceiling</td>
+      </tr>
+      <tr>
+        <td><code>multi</code></td>
+        <td>8</td>
+        <td><strong>~7.7M ops/sec</strong></td>
+        <td>~200 ns</td>
+        <td>~1.8 µs</td>
+        <td>Production pattern: one book per thread (sharded symbols)</td>
+      </tr>
+      <tr>
+        <td><code>contended</code></td>
+        <td>8</td>
+        <td>~22k ops/sec</td>
+        <td>~80 ns</td>
+        <td><strong>~16 ms</strong></td>
+        <td>Anti-pattern: all threads fight one <code>synchronized</code> lock</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="card">
+    <strong>Why contended looks “much slower”</strong>
+    <p>
+      In <code>contended</code> mode, eight threads serialize on a single shared <code>MatchingEngine</code>.
+      p50 can still look fast (~80 ns) when a thread briefly wins the lock, but p99 explodes to milliseconds
+      from lock queueing and OS scheduling — not from match logic (~30 ns in JMH).
+    </p>
+    <p>
+      Compare against <code>./gradlew run</code> (~125 ns p50) or <code>./gradlew jmh</code> (~27 ns/op) for
+      isolated hot-path speed. Use <code>multi</code> for aggregate exchange throughput.
+    </p>
+  </div>
+
+  <h3>Default traffic mix (per 100 ops)</h3>
+  <ul>
+    <li>65% limit submit</li>
+    <li>20% cancel</li>
+    <li>10% IOC</li>
+    <li>5% L2 snapshot</li>
+  </ul>
+
+  <h3>Sample output</h3>
+  <pre>Total operations: 2,451,003
+Throughput: 245,100 ops/sec
+Latency: min=120ns p50=842ns p99=4102ns p999=12000ns max=85000ns</pre>
+
+  <div class="card">
+    <strong>JMH vs load test</strong>
+    <p><code>./gradlew jmh</code> — isolated nanosecond measurement of one operation (scientific).</p>
+    <p><code>./gradlew runLoadTest</code> — sustained traffic, mixed workload (operational).</p>
+  </div>
+</section>
+
+<section id="fastbook">
+  <h2>12. Fast matcher (industry-shaped)</h2>
+  <p>
+    <code>FastOrderBook</code> is the <strong>default</strong> engine. Same API and matching rules as the
+    TreeMap version, but structured like production matchers:
+  </p>
+  <table>
+    <thead><tr><th>Technique</th><th>Tree book</th><th>Fast book</th></tr></thead>
+    <tbody>
+      <tr><td>Price levels</td><td><code>TreeMap</code></td><td><code>FastLevel[]</code> indexed by tick</td></tr>
+      <tr><td>Orders at level</td><td><code>ArrayDeque</code> (alloc)</td><td>Pooled intrusive linked list</td></tr>
+      <tr><td>Match loop</td><td>Allocates deque nodes</td><td>Updates qty in-place, releases to pool</td></tr>
+      <tr><td>Best bid/ask</td><td><code>firstKey()</code></td><td>Cached tick + scan on level empty</td></tr>
+      <tr><td>Trade collection</td><td><code>ArrayList</code></td><td>Reused <code>TradeBuffer</code></td></tr>
+    </tbody>
+  </table>
+  <pre>MatchingEngine engine = new MatchingEngine();           // FAST (default)
+MatchingEngine tree   = MatchingEngine.create(BookKind.TREE);  // learning book</pre>
+  <p>Run <code>OrderBookEquivalenceTest</code> — both implementations must produce identical books.</p>
+
+  <p>
+    For raw speed difference, see <a href="#jmh">§10 JMH</a> — <code>BookKindBenchmark</code> runs the same
+    hot paths on FAST vs TREE side by side. For structure diagrams, see <a href="#datastructures">§2b Data Structures</a>.
+  </p>
+</section>
+
+<section id="pipeline">
+  <h2>13. Cloud-exchange pipeline (implemented)</h2>
+  <p>
+    <code>CloudExchange</code> wires ingress → sequencer → FancyPQ → sharded matchers → fair market-data fanout.
+    Run: <code>./gradlew runPipeline</code>
+  </p>
+
+  <pre>Participant → Sequencer (global seq)
+           → PriorityIngress (FancyPQ burst reorder)
+           → ExchangeRouter → SymbolShard (ring buffer → FastOrderBook)
+           → FairMarketDataPublisher (simultaneous release)
+           → EventJournal</pre>
+
+  <table>
+    <thead><tr><th>Component</th><th>Research inspiration</th><th>clob-lab class</th></tr></thead>
+    <tbody>
+      <tr><td>Global ingress sequencing</td><td>Jasper (2024) inbound fairness</td><td><code>Sequencer</code></td></tr>
+      <tr><td>Burst priority near mid-price</td><td>Jasper FancyPQ (2024)</td><td><code>PriorityIngress</code></td></tr>
+      <tr><td>SPSC ring between stages</td><td>LMAX Disruptor / Chronicle</td><td><code>RingBuffer</code> — see <a href="#ring">§13a</a></td></tr>
+      <tr><td>One thread per symbol</td><td>Industry shard model</td><td><code>SymbolShard</code> (see <a href="#industry">§13b</a>)</td></tr>
+      <tr><td>Fair MD batch release</td><td>Onyx (SIGCOMM 2025) outbound fairness</td><td><code>FairMarketDataPublisher</code></td></tr>
+    </tbody>
+  </table>
+  <p>See <a href="#ring">§13a The ring buffer</a> and <a href="#industry">§13b Industry vs clob-lab</a>.</p>
+</section>
+
+<section id="ring">
+  <h2>13a. The ring buffer — what it does</h2>
+  <p>
+    The ring is a <strong>queue between routing and matching</strong> — one per symbol shard. It holds
+    <code>SequencedCommand</code> objects (order + cancel + global sequence) until the matcher consumes them.
+    Inspired by LMAX Disruptor / Chronicle: pre-allocated slots, single-producer single-consumer (SPSC), no alloc on offer/poll.
+  </p>
+
+  <div class="card highlight">
+    <strong>One sentence</strong>
+    <p>The ring buffers sequenced orders per symbol so ingress can push fast, the matcher consumes at its own pace, and the book never sees concurrent writers.</p>
+  </div>
+
+  <h3>Where it runs (and where it doesn't)</h3>
+  <table>
+    <thead><tr><th>Entry point</th><th>Uses ring?</th><th>Path</th></tr></thead>
+    <tbody>
+      <tr><td><code>./gradlew runPipeline</code></td><td><span class="tag yes">Yes</span></td><td><code>CloudExchange</code> → <code>SymbolShard.inboundRing</code></td></tr>
+      <tr><td><code>./gradlew runDemo</code></td><td><span class="tag no">No</span></td><td><code>Main</code> → <code>MatchingEngine</code> directly</td></tr>
+      <tr><td><code>./gradlew runLoadTest</code></td><td><span class="tag no">No</span></td><td><code>LoadTestRunner</code> → engine directly</td></tr>
+      <tr><td><code>./gradlew run</code> / <code>jmh</code></td><td><span class="tag no">No</span></td><td>Benchmarks bypass pipeline</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    Created in <code>SymbolShard</code> when you build <code>CloudExchange(symbolCount, ringCapacity, …)</code>.
+    Each symbol gets its own <code>RingBuffer&lt;SequencedCommand&gt;</code> (default demo: capacity 1024).
+  </p>
+
+  <h3>What problem it solves</h3>
+  <ul>
+    <li><strong>Decouple</strong> — ingress accepts orders while the matcher works (in production: different threads)</li>
+    <li><strong>Buffer bursts</strong> — absorb microsecond spikes instead of blocking the gateway</li>
+    <li><strong>Single consumer</strong> — matcher sees one ordered stream per symbol</li>
+    <li><strong>Back-pressure</strong> — <code>offer()</code> returns <code>false</code> when full.
+      <code>flushBatch</code> keeps leftovers in ingress and reports <code>ExchangeTick.deferred()</code>; next flush retries.
+      <code>submit()</code> itself always succeeds (unbounded ingress list).</li>
+  </ul>
+
+  <h3>Flow through the pipeline</h3>
+  <div class="pipe-stack">
+    <div class="pipe-step">submit() → ingressBatch (ArrayList — <em>not</em> the ring yet)</div>
+    <div class="pipe-step">flushBatch() → Sequencer + FancyPQ reorder</div>
+    <div class="pipe-step highlight">router.route() → inboundRing.offer(command) — producer writes ring</div>
+    <div class="pipe-step highlight">shard.processAll() → inboundRing.poll() → MatchingEngine — consumer drains ring</div>
+    <div class="pipe-step">FairMarketDataPublisher.flush() + journal</div>
+  </div>
+
+  <h3>Ring illustrated (one symbol shard)</h3>
+  <div class="ring-flow">
+    <div style="color:var(--muted);min-width:5rem;">Router<br>offer →</div>
+    <div class="ring-arrow">→</div>
+    <div class="ring-box">
+      <h5>inboundRing — Symbol 0</h5>
+      <div class="ring-slots">
+        <div class="ring-slot filled"><span class="rs-seq">5</span><span>BUY</span></div>
+        <div class="ring-slot filled"><span class="rs-seq">8</span><span>CAN</span></div>
+        <div class="ring-slot filled"><span class="rs-seq">12</span><span>SEL</span></div>
+        <div class="ring-slot">·</div>
+        <div class="ring-slot">·</div>
+      </div>
+      <p style="margin:0.5rem 0 0;font-size:0.72rem;color:var(--muted);">FIFO: oldest at head → poll → match</p>
+    </div>
+    <div class="ring-arrow">→</div>
+    <div style="color:var(--muted);min-width:5rem;">processAll()<br>poll →<br>Matcher</div>
+  </div>
+
+  <h3>offer vs poll</h3>
+  <table>
+    <thead><tr><th>Operation</th><th>Who</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td><code>offer(cmd)</code></td><td>Producer (router / ingress)</td><td>Write to next slot; fail if ring full</td></tr>
+      <tr><td><code>poll()</code></td><td>Consumer (matcher side)</td><td>Read oldest slot; clear it; return command or null</td></tr>
+      <tr><td><code>processAll()</code></td><td><code>SymbolShard</code></td><td>Loop poll → <code>submitLimitOrder</code> / <code>cancel</code> → stage MD</td></tr>
+    </tbody>
+  </table>
+
+  <pre>// Producer — ExchangeRouter.route()
+shard(symbolId).enqueue(sequenced);  // → inboundRing.offer()
+
+// Consumer — CloudExchange.flushBatch()
+for (SymbolShard shard : router.shards()) {
+    shard.processAll();  // → poll loop → MatchingEngine
+}</pre>
+
+  <h3>Demo vs production threading</h3>
+  <div class="arch-compare">
+    <div class="arch-col">
+      <h4 style="color:var(--yellow);">clob-lab demo (today)</h4>
+      <p style="font-size:0.9rem;">
+        <code>PipelineRunner</code> calls <code>submit()</code> then <code>flushBatch()</code> on the
+        <strong>same thread</strong>. The ring often holds commands for only a moment — structural, not async yet.
+      </p>
+      <pre style="font-size:0.75rem;">submit × 3 → list
+flushBatch → offer all → poll all → match</pre>
+    </div>
+    <div class="arch-col fast">
+      <h4>Production target</h4>
+      <p style="font-size:0.9rem;">
+        <strong>Thread A</strong> (gateway) calls <code>offer()</code> only.
+        <strong>Thread B</strong> (pinned matcher) runs <code>poll()</code> forever.
+        Never share the book across threads.
+      </p>
+      <pre style="font-size:0.75rem;">Ingress thread ──offer──► Ring
+Matcher thread ──poll───► Engine</pre>
+    </div>
+  </div>
+
+  <h3>Why a ring instead of ArrayList?</h3>
+  <table>
+    <thead><tr><th>RingBuffer</th><th>Plain list</th></tr></thead>
+    <tbody>
+      <tr><td>Fixed capacity → explicit back-pressure</td><td>Grows until memory pressure</td></tr>
+      <tr><td>Power-of-2 indexing → fast slot lookup</td><td>May resize / reallocate</td></tr>
+      <tr><td>SPSC, lock-free in single-writer design</td><td>Needs locks if multi-threaded</td></tr>
+      <tr><td>Industry pattern (Disruptor, Chronicle)</td><td>Fine for toys only</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card">
+    <strong>Not the full LMAX Disruptor</strong>
+    <p>
+      clob-lab's <code>RingBuffer</code> is ~50 lines — no wait strategies, gating graph, or event reuse in slots.
+      It captures the <em>idea</em> (queue between stages). See <a href="#industry">§13b</a> for how this fits the wider exchange layout.
+    </p>
+  </div>
+
+  <pre>./gradlew runPipeline
+
+// CloudExchange( symbolCount, ringCapacityPerShard, burstThreshold )
+// PipelineRunner uses: CloudExchange(2, 1024, 3)</pre>
+</section>
+
+<section id="industry">
+  <h2>13b. Industry vs clob-lab</h2>
+  <p>
+    clob-lab uses the <strong>right blueprint at teaching scale</strong>: one book per instrument, sharded matchers,
+    pipeline stages, journal, market-data fanout. It is not a production exchange — but the mental model matches what
+    equities, crypto spot, and most CLOB venues actually build.
+  </p>
+
+  <h3>One ticker = one order book</h3>
+  <p>
+    Real exchanges never mix AAPL and GOOG in a single book. Orders only match within the same instrument.
+    <strong>10,000 tickers → 10,000 independent matchers</strong> (logically; physically they may share machines).
+  </p>
+
+  <div class="shard-fanout">
+    <div class="router-node">ExchangeRouter — route by symbolId</div>
+    <div class="fanout-lines">│ &nbsp; │ &nbsp; │ &nbsp; │ &nbsp; … &nbsp; │</div>
+    <div class="shard-grid">
+      <div class="shard-box">
+        <div class="shard-id">Symbol 0</div>
+        <div class="shard-detail">RingBuffer<br>MatchingEngine<br>FastOrderBook</div>
+      </div>
+      <div class="shard-box">
+        <div class="shard-id">Symbol 1</div>
+        <div class="shard-detail">RingBuffer<br>MatchingEngine<br>FastOrderBook</div>
+      </div>
+      <div class="shard-box">
+        <div class="shard-id">Symbol 2</div>
+        <div class="shard-detail">RingBuffer<br>MatchingEngine<br>FastOrderBook</div>
+      </div>
+      <div class="shard-box" style="opacity:0.7;">
+        <div class="shard-id">…</div>
+        <div class="shard-detail">× 9,997 more</div>
+      </div>
+    </div>
+  </div>
+
+  <p>
+    In code: <code>CloudExchange(symbolCount, …)</code> creates one <code>SymbolShard</code> per symbol, each with its
+    own <code>new MatchingEngine()</code>. See <code>SymbolShard.java</code> and <code>ExchangeRouter.java</code>.
+  </p>
+
+  <h3>Production exchange layout</h3>
+  <p>A simplified view of what sits between clients and the matcher in a real venue:</p>
+
+  <div class="pipe-stack">
+    <div class="pipe-step">Clients / banks / HFT firms</div>
+    <div class="pipe-step">↓ Gateway — FIX or binary wire, auth, rate limits, validation</div>
+    <div class="pipe-step">↓ Sequencer / ingress fairness (cloud venues — Jasper-style)</div>
+    <div class="pipe-step highlight">↓ Router by symbolId</div>
+    <div class="pipe-step highlight">→ Shard → ring buffer → matcher → order book (single writer per symbol)</div>
+    <div class="pipe-step">↓ Market-data fanout — trades + L2 to subscribers</div>
+    <div class="pipe-step">↓ Journal / replication — audit, replay, disaster recovery</div>
+  </div>
+
+  <p>
+    clob-lab implements the highlighted middle: router, shard, ring, matcher, book, fair MD batch, journal —
+    but skips gateway, wire protocol, off-heap persistence, and pinned OS threads.
+    Ring details: <a href="#ring">§13a The ring buffer</a>.
+  </p>
+
+  <h3>What industry does — and clob-lab gets right</h3>
+  <table>
+    <thead><tr><th>Pattern</th><th>Industry</th><th>clob-lab</th></tr></thead>
+    <tbody>
+      <tr><td>One book per symbol</td><td>Universal for CLOB</td><td><span class="tag yes">Yes</span> <code>SymbolShard</code></td></tr>
+      <tr><td>Price–time priority</td><td>Standard matching rule</td><td><span class="tag yes">Yes</span> both book implementations</td></tr>
+      <tr><td>Single writer per book</td><td>No locks on match path</td><td><span class="tag yes">Shape</span> load test <code>multi</code> mode</td></tr>
+      <tr><td>Route by symbolId</td><td>O(1) shard lookup</td><td><span class="tag yes">Yes</span> <code>ExchangeRouter</code></td></tr>
+      <tr><td>Ring buffers between stages</td><td>LMAX, Chronicle, many cores</td><td><span class="tag yes">Yes</span> <code>RingBuffer</code></td></tr>
+      <tr><td>Integer price ticks</td><td>No float/BigDecimal on hot path</td><td><span class="tag yes">Yes</span></td></tr>
+      <tr><td>Array / pool book structure</td><td>Common in fast matchers</td><td><span class="tag yes">Yes</span> <code>FastOrderBook</code></td></tr>
+      <tr><td>Event journal + replay</td><td>Regulatory &amp; recovery</td><td><span class="tag yes">Yes</span> in-memory demo</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Where clob-lab simplifies</h3>
+  <table>
+    <thead><tr><th>Topic</th><th>Production</th><th>clob-lab</th></tr></thead>
+    <tbody>
+      <tr><td>Threading</td><td>Pinned thread (or core) per symbol shard</td><td><code>flushBatch()</code> drains shards on caller thread — structure only</td></tr>
+      <tr><td>Memory per symbol</td><td>Small per-instrument tick ladder</td><td>Default 1M ticks × pool — fine for lab, huge × 10k symbols</td></tr>
+      <tr><td>Networking</td><td>Binary wire (SBE, custom), often kernel bypass</td><td>In-process <code>InboundCommand</code></td></tr>
+      <tr><td>FIX / gateways</td><td>At the edge, not on match path</td><td>Not implemented</td></tr>
+      <tr><td>Persistence</td><td>Durable replicated log, often off-heap</td><td>In-memory <code>EventJournal</code></td></tr>
+      <tr><td>Cloud fairness</td><td>Jasper / Onyx sequencing &amp; MD trees</td><td>Simplified <code>Sequencer</code> + <code>PriorityIngress</code></td></tr>
+      <tr><td>Hardware</td><td>Some venues: FPGA match engines</td><td>Java only</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card highlight">
+    <strong>Why load-test modes matter</strong>
+    <ul>
+      <li><code>multi</code> — N threads × N books = production sharding (~7M ops/sec aggregate in sample runs)</li>
+      <li><code>contended</code> — one shared book + lock = anti-pattern (~22k ops/sec, ms tail latency)</li>
+      <li>Real exchanges never run the contended model on the match path</li>
+    </ul>
+    <p>Details: <a href="#loadtest">§11 Load testing</a></p>
+  </div>
+
+  <h3>Variations in the wild</h3>
+  <div class="compare-grid">
+    <div class="compare-box">
+      <h4>Equities</h4>
+      <p>Strict audit trail, co-location, microsecond targets, regulatory reporting. Often Java or C++ cores.</p>
+    </div>
+    <div class="compare-box">
+      <h4>Crypto spot</h4>
+      <p>Same shard idea; many symbols per process; co-location less critical than traditional exchanges.</p>
+    </div>
+    <div class="compare-box">
+      <h4>Cloud venues (2024+)</h4>
+      <p>Extra fairness layers (Jasper, Onyx, Cuttlefish) because network jitter dominates rack-local latency.</p>
+    </div>
+    <div class="compare-box">
+      <h4>FPGA matchers</h4>
+      <p>Same matching <em>rules</em>, different implementation — hardware order book at wire speed.</p>
+    </div>
+  </div>
+
+  <h3>Bottom line</h3>
+  <table class="qa-table">
+    <thead><tr><th>Question</th><th>Answer</th></tr></thead>
+    <tbody>
+      <tr><td>One book per ticker?</td><td><strong>Yes</strong> — industry standard</td></tr>
+      <tr><td>Sharded matchers?</td><td><strong>Yes</strong></td></tr>
+      <tr><td>Ring + journal + MD fanout?</td><td><strong>Yes</strong> — common pipeline shape</td></tr>
+      <tr><td>Is clob-lab how CME/NASDAQ runs verbatim?</td><td><strong>No</strong> — in-process, no wire, demo threading</td></tr>
+      <tr><td>Right model to learn from?</td><td><strong>Yes</strong> — rooms in the right places, walls at 1:100 scale</td></tr>
+    </tbody>
+  </table>
+
+  <pre>// Multi-symbol in clob-lab
+CloudExchange exchange = new CloudExchange(/* symbolCount */ 10_000, ringCap, burstThreshold);
+exchange.submit(InboundCommand.submitLimit(/*symbolId*/ 42, orderId, Side.BUY, 100, 10));
+exchange.flushBatch();  // route → shard 42's ring → matcher → book</pre>
+</section>
+
+<section id="research">
+  <h2>14. Modern research (2024+) &amp; reading list</h2>
+  <p>LMAX (~2011) is still foundational for in-process pipelines. Recent work focuses on <strong>cloud fairness</strong>, <strong>network variance</strong>, and <strong>hardware</strong>.</p>
+
+  <h3>Cloud exchanges &amp; fairness</h3>
+  <ul>
+    <li><a href="https://arxiv.org/html/2402.09527v6">Jasper — Scalable Exchange in the Public Cloud (2024)</a> — overlay multicast, global sequencing, FancyPQ</li>
+    <li><a href="https://anirudhsk.github.io/papers/cloud_exchange_sigcomm2025.pdf">Onyx — SIGCOMM 2025</a> — bidirectional overlay tree, outbound/inbound fairness</li>
+    <li><a href="https://liangchengyu.com/doc/cuttlefish_aft2025_extended.pdf">Cuttlefish — AFT 2025</a> — virtual-time execution for cloud exchanges</li>
+  </ul>
+
+  <h3>Java low-latency (post-LMAX)</h3>
+  <ul>
+    <li><a href="https://chronicle.build/building-fast-trading-engines-chronicles-approach-to-low-latency-trading/">Chronicle Queue / Services</a> — off-heap IPC, single-thread microservices</li>
+    <li><a href="https://weareadaptive.com/trading-resources/blog/aeron-google-cloud-performance-testing/">Aeron + Google Cloud (2024)</a> — cloud-native transport &amp; clustering</li>
+    <li><a href="https://martinfowler.com/articles/lmax.html">Martin Fowler — LMAX Architecture (2011)</a> — still the best pipeline overview</li>
+  </ul>
+
+  <h3>Hardware / FPGA</h3>
+  <ul>
+    <li><a href="https://doi.org/10.1109/asap61560.2024.00025">FPGA Order Book Building (IEEE ASAP 2024)</a></li>
+    <li><a href="https://www.amd.com/en/blogs/2024/amd-sets-stac-benchmark-world-record-for-fastest-e.html">AMD/Exegy STAC-T0 (2024)</a></li>
+  </ul>
+
+  <h3>Market structure (timeless)</h3>
+  <ul>
+    <li><a href="https://doi.org/10.1093/oso/9780195144703.001.0001">Larry Harris — Trading and Exchanges (2002)</a></li>
+  </ul>
+
+  <div class="card highlight">
+    <strong>What we applied vs what we skipped</strong>
+    <ul>
+      <li><span class="tag yes">Applied</span> sequencer, FancyPQ-lite, rings, sharded matchers, fair MD batch</li>
+      <li><span class="tag no">Not yet</span> TCP gateway, cloud overlay network, virtual time, FPGA, Chronicle off-heap</li>
+    </ul>
+  </div>
+</section>
+
+<section id="latency">
+  <h2>15. Low-latency Java (and vs C++)</h2>
+  <p>
+    This project is a <em>learning toy</em>. Real trading systems optimize the hot path to microseconds or below.
+    Here's what matters and how this code relates.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Technique</th><th>In clob-lab?</th><th>Why it matters</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Integer price ticks</td><td><span class="tag yes">Yes</span></td><td>No BigDecimal / float on hot path</td></tr>
+      <tr><td>MatchSink callback</td><td><span class="tag yes">Yes</span></td><td>Avoid allocating trade lists during match</td></tr>
+      <tr><td>O(1) cancel index</td><td><span class="tag yes">Yes</span></td><td><code>orderId → location</code> hash map</td></tr>
+      <tr><td>TreeMap price levels</td><td><span class="tag yes">Yes (TREE)</span></td><td>Learning book; FAST uses array ticks</td></tr>
+      <tr><td>Zero alloc hot path</td><td><span class="tag yes">Mostly (FAST)</span></td><td>Pooled orders; primitive trade buffer; reused <code>MatchResult</code>; <code>Trade</code> records only if you call <code>trades()</code></td></tr>
+      <tr><td>Object pooling</td><td><span class="tag yes">Yes (FAST)</span></td><td><code>OrderPool</code> + <code>PooledOrder</code> intrusive lists</td></tr>
+      <tr><td>Off-heap memory</td><td><span class="tag no">No</span></td><td>Chronicle / Agrona for GC-free buffers</td></tr>
+      <tr><td>Kernel bypass networking</td><td><span class="tag no">No</span></td><td>DPDK, Solarflare for wire-to-wire speed</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Java vs C++ in trading</h3>
+  <div class="compare-grid">
+    <div class="compare-box">
+      <h4>C++</h4>
+      Manual memory, no GC pauses, used for matching engines, gateways, and FPGA-adjacent paths when nanoseconds count.
+    </div>
+    <div class="compare-box">
+      <h4>Java</h4>
+      Common for buy-side, risk, and many exchange middle tiers. With disciplined coding (pools, off-heap, Disruptor ring buffers), microsecond latency is achievable.
+    </div>
+  </div>
+
+  <p>
+    Run <code>./gradlew run</code> for a quick histogram, or <code>./gradlew jmh</code> for proper microbenchmarks.
+    Always warm critical paths before measuring latency.
+  </p>
+</section>
+
+<section id="learn">
+  <h2>16. Learn from the codebase</h2>
+  <p>
+    This repo is small enough to read end-to-end, but it has two layers. Start with matching rules,
+    then add the pipeline. Do not start in <code>FastOrderBook</code> or <code>CloudExchange</code> —
+    those hide the rules behind performance and orchestration.
+  </p>
+
+  <div class="card highlight">
+    <strong>How to use this section</strong>
+    <p>Walk the steps in order. After each step, run the command, then open the listed files.
+    The refactor list at the bottom is homework — bugs and cleanups that teach more than reading.</p>
+  </div>
+
+  <h3>Read order (the map)</h3>
+  <div class="flow">
+    <span class="flow-step">model/</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">OrderBook (TREE)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">MatchingEngine</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">tests + demo</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">FastOrderBook</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">pipeline</span>
+  </div>
+
+  <h3>Step-by-step walkthrough</h3>
+
+  <div class="learn-step">
+    <div class="learn-num">1</div>
+    <div class="learn-body">
+      <h4>Domain types — 10 minutes</h4>
+      <p>Open <code>model/Side.java</code>, <code>Order.java</code>, <code>OrderType.java</code>, <code>Trade.java</code>, <code>MatchResult.java</code>.</p>
+      <p>Notice: prices are <code>long</code> ticks, never <code>double</code>. <code>Order</code> is an immutable record.
+      <code>MatchResult</code> tells you trades, leftover qty, and whether anything rested.</p>
+      <p>Question to answer: what is the difference between remaining quantity on IOC vs LIMIT?</p>
+    </div>
+  </div>
+
+  <div class="learn-step">
+    <div class="learn-num">2</div>
+    <div class="learn-body">
+      <h4>Tree book — the readable matcher</h4>
+      <p>Open <code>book/OrderBook.java</code> then <code>book/PriceLevel.java</code>. Draw two TreeMaps on paper (bids reversed, asks natural).</p>
+      <p>Trace <code>matchAggressive()</code> with: asks 100×20 and 101×50, then <code>BUY 25 @ 100</code>.
+      You should stop after filling 20 — limit 100 cannot cross 101. Remainder rests if LIMIT.</p>
+      <p>Then read <code>cancel()</code>: <code>orderIndex</code> finds the level, deque scan removes the order.</p>
+      <pre>./gradlew test --tests 'com.cloblab.engine.MatchingEngineTest'</pre>
+    </div>
+  </div>
+
+  <div class="learn-step">
+    <div class="learn-num">3</div>
+    <div class="learn-body">
+      <h4>Engine orchestration</h4>
+      <p>Open <code>engine/MatchingEngine.java</code>. All order types share <code>submit()</code>:</p>
+      <ol>
+        <li>Match aggressively against the opposite side</li>
+        <li>If leftover and <code>allowRest</code> (LIMIT only) → <code>addRestingOrder</code></li>
+        <li>FOK is special: <code>availableAtOrBetter</code> first, reject with zero trades if not enough</li>
+      </ol>
+      <p>Run the demo and match output to the tests:</p>
+      <pre>./gradlew runDemo</pre>
+    </div>
+  </div>
+
+  <div class="learn-step">
+    <div class="learn-num">4</div>
+    <div class="learn-body">
+      <h4>Journal + replay</h4>
+      <p>Open <code>journal/OrderEvent.java</code>, <code>EventJournal.java</code>, <code>EventReplayer.java</code>, then the inner class <code>MatchingEngine.Journaled</code>.</p>
+      <p>Pattern: record the <em>intent</em> (submit/cancel), not the trades. Replay into a fresh engine must rebuild the same book.
+      That is how exchanges recover after a crash.</p>
+      <p>Exercise: add a journal event, replay, assert <code>bestBid</code> / <code>bestAsk</code> / totals match live.</p>
+    </div>
+  </div>
+
+  <div class="learn-step">
+    <div class="learn-num">5</div>
+    <div class="learn-body">
+      <h4>Fast book — same rules, different containers</h4>
+      <p>Read <a href="#datastructures">§2b</a> first, then <code>FastOrderBook.java</code>, <code>OrderPool.java</code>, <code>PooledOrder.java</code>, <code>FastLevel.java</code>.</p>
+      <p>Map TREE → FAST: <code>TreeMap.get(price)</code> becomes <code>array[price - tickBase]</code>.
+      <code>ArrayDeque</code> becomes pool slots with <code>prev</code>/<code>next</code>. Best bid/ask are cached ticks.</p>
+      <pre>./gradlew test --tests 'com.cloblab.engine.OrderBookEquivalenceTest'</pre>
+      <p>Then compare speed:</p>
+      <pre>./gradlew jmh</pre>
+    </div>
+  </div>
+
+  <div class="learn-step">
+    <div class="learn-num">6</div>
+    <div class="learn-body">
+      <h4>Load tests — why threading matters</h4>
+      <p>Open <code>loadtest/LoadTestRunner.java</code>. Three modes, same matcher:</p>
+      <ul>
+        <li><code>single</code> — one thread, one book</li>
+        <li><code>multi</code> — N threads, N books (production shard)</li>
+        <li><code>contended</code> — N threads, one locked book (anti-pattern)</li>
+      </ul>
+      <pre>./gradlew runLoadTest --args="--mode=single --duration=5"
+./gradlew runLoadTest --args="--mode=multi --threads=4 --duration=5"
+./gradlew runLoadTest --args="--mode=contended --threads=4 --duration=5"</pre>
+      <p>Look at p99, not just p50. Details in <a href="#loadtest">§11</a>.</p>
+    </div>
+  </div>
+
+  <div class="learn-step">
+    <div class="learn-num">7</div>
+    <div class="learn-body">
+      <h4>Pipeline — where the ring lives</h4>
+      <p>Read <a href="#ring">§13a</a>, then in this order:</p>
+      <ol>
+        <li><code>protocol/InboundCommand.java</code> — wire-shaped input with <code>symbolId</code></li>
+        <li><code>pipeline/Sequencer.java</code> — stamps global sequence</li>
+        <li><code>pipeline/PriorityIngress.java</code> — FancyPQ burst reorder</li>
+        <li><code>exchange/ExchangeRouter.java</code> + <code>SymbolShard.java</code> — ring.offer / ring.poll</li>
+        <li><code>exchange/CloudExchange.java</code> — <code>submit()</code> then <code>flushBatch()</code></li>
+      </ol>
+      <pre>./gradlew runPipeline
+./gradlew test --tests 'com.cloblab.exchange.CloudExchangeTest'</pre>
+      <p>Breakpoint <code>SymbolShard.enqueue</code> and <code>processAll</code>. Watch the ring fill then drain on one flush.</p>
+    </div>
+  </div>
+
+  <div class="learn-step">
+    <div class="learn-num">8</div>
+    <div class="learn-body">
+      <h4>Fix something — that is the real learning</h4>
+      <p>Pick one item from the refactor backlog below. Write a failing test first, then fix, then re-run <code>./gradlew test</code>.</p>
+      <p>R1–R3 are done. Next: <strong>R4</strong> (one apply/journal helper) or <strong>R5</strong> (extract Journaled).</p>
+    </div>
+  </div>
+
+  <h3>What each file is teaching</h3>
+  <table>
+    <thead><tr><th>File</th><th>Concept to extract</th></tr></thead>
+    <tbody>
+      <tr><td><code>OrderBook</code></td><td>Price-time priority as two sorted maps + FIFO queues</td></tr>
+      <tr><td><code>MatchingEngine</code></td><td>Order types are flags around one match loop (<code>allowRest</code>)</td></tr>
+      <tr><td><code>TradeBuffer</code></td><td>Primitive long arrays on the match loop; <code>Trade</code> records only when inspected</td></tr>
+      <tr><td><code>OrderPool</code></td><td>Acquire/release instead of <code>new</code> inside match</td></tr>
+      <tr><td><code>RingBuffer</code></td><td>SPSC queue: offer/poll, power-of-two mask, back-pressure</td></tr>
+      <tr><td><code>SymbolShard</code></td><td>One book, one consumer — never share a matcher</td></tr>
+      <tr><td><code>EventReplayer</code></td><td>Deterministic recovery from intents, not from trade prints</td></tr>
+      <tr><td><code>LoadTestRunner</code></td><td>Throughput vs tail latency; lock contention vs sharding</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="refactor">
+  <h2>16b. Refactor backlog (found in review)</h2>
+  <p>
+    These are real issues in the current code — good learning tasks, not busywork.
+    Do them one at a time with a test. Skip anything marked “later” until the matcher is solid.
+    <strong>R1–R3 are done</strong> (tests + fix in this repo).
+  </p>
+
+  <h3>Fix soon — correctness</h3>
+  <table>
+    <thead><tr><th>ID</th><th>Issue</th><th>Where</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>R1</td>
+        <td><span class="tag yes">Fixed</span> L2 level qty stale after match</td>
+        <td><code>FastOrderBook.matchLevel</code></td>
+        <td>
+          Now subtracts <code>fillQty</code> from <code>level.totalQuantity</code> on every fill.
+          <code>popHead</code> only unlinks. Tests: <code>l2SnapshotQuantityDropsAfterPartialFill</code>,
+          <code>l2SnapshotDropsEmptyLevelAfterFullFill</code>. Equivalence also compares snapshots.
+        </td>
+      </tr>
+      <tr>
+        <td>R2</td>
+        <td><span class="tag yes">Fixed</span> FancyPQ is undone</td>
+        <td><code>CloudExchange.flushBatch</code></td>
+        <td>
+          Reorder per symbol, then <code>route()</code> — no global re-sort by sequence.
+          <code>burstReordersCriticalOrdersFirst</code> now asserts the nearer aggressive order (id 11) is the taker.
+        </td>
+      </tr>
+      <tr>
+        <td>R3</td>
+        <td><span class="tag yes">Fixed</span> honest ingress vs ring back-pressure</td>
+        <td><code>CloudExchange.submit</code> / <code>flushBatch</code></td>
+        <td>
+          <code>submit()</code> always queues to the unbounded ingress batch (returns true) — it never touches the ring.
+          If a shard ring is full, <code>flushBatch</code> leaves leftovers in ingress and reports
+          <code>ExchangeTick.deferred()</code>. Next flush retries. Tests:
+          <code>submitQueuesToIngressAndDoesNotTouchTheRing</code>,
+          <code>flushDefersWhenShardRingIsFullThenDrainsOnNextFlush</code>.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Clean up — same behavior, less duplication</h3>
+  <table>
+    <thead><tr><th>ID</th><th>Issue</th><th>Where</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>R4</td>
+        <td>Submit/cancel switch copied 3 times</td>
+        <td><code>EventReplayer</code>, <code>CloudExchange.recordJournal</code>, <code>SymbolShard.apply</code></td>
+        <td>
+          One function: <code>apply(MatchingEngine, orderType, …)</code> and one journal helper
+          <code>journal.record(InboundCommand)</code>. <code>InboundCommand</code> is missing MARKET/FOK factories too.
+        </td>
+      </tr>
+      <tr>
+        <td>R5</td>
+        <td><code>MatchingEngine.Journaled</code> is a copy-paste facade</td>
+        <td><code>MatchingEngine.java</code></td>
+        <td>Extract <code>JournaledMatchingEngine</code> so the core engine stays ~80 lines. Same API, easier to read.</td>
+      </tr>
+      <tr>
+        <td>R6</td>
+        <td><span class="tag yes">Fixed</span> no <code>AtomicLong</code> on the matcher</td>
+        <td><code>MatchingEngine.sequence</code></td>
+        <td>Plain <code>long</code> — single writer. Journal still uses AtomicLong (R6 leftover there).</td>
+      </tr>
+      <tr>
+        <td>R7</td>
+        <td>TREE totals scan every query</td>
+        <td><code>OrderBook.totalBidQuantity</code></td>
+        <td>Cache running totals like FAST does — or leave it as the slow-but-clear version and document that.</td>
+      </tr>
+      <tr>
+        <td>R8</td>
+        <td><span class="tag yes">Fixed</span> no <code>Trade</code> on the match loop</td>
+        <td><code>TradeBuffer</code> / <code>MatchResult</code> / <code>MatchingEngine</code></td>
+        <td>
+          Fills write primitive arrays. Engine reuses one <code>MatchResult</code> (consume before next submit).
+          No per-submit lambda (<code>MatchingEngine</code> is the <code>MatchSink</code>).
+          FAST rest uses <code>addResting(...)</code> — no <code>new Order</code>.
+        </td>
+      </tr>
+      <tr>
+        <td>R9</td>
+        <td>FQCN instead of imports</td>
+        <td><code>EventJournal</code>, <code>Main.printBook</code>, <code>CloudExchange.flushBatch</code></td>
+        <td>Normal imports. Tiny, but it is noise while learning.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Later — production shape (do after R1–R3)</h3>
+  <table>
+    <thead><tr><th>ID</th><th>Issue</th><th>What you would learn</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>R10</td>
+        <td>Ring has no <code>volatile</code> / memory barriers; demo is same-thread</td>
+        <td>SPSC publication (Disruptor sequencers). Add a pinned consumer thread per shard and a test that offers from another thread.</td>
+      </tr>
+      <tr>
+        <td>R11</td>
+        <td>Journal has no <code>symbolId</code> — cannot replay a multi-symbol exchange</td>
+        <td>Event schema evolution. Replay should rebuild <code>CloudExchange</code>, not a single engine.</td>
+      </tr>
+      <tr>
+        <td>R12</td>
+        <td>FAST default: 1M ticks × 2 sides + 524k pool per symbol</td>
+        <td>Per-instrument tick ladders. Try <code>new FastOrderBook(90, 30, 4096)</code> for a lab symbol.</td>
+      </tr>
+      <tr>
+        <td>R13</td>
+        <td>Ring stores object references, not reused event slots</td>
+        <td>True Disruptor style: pre-allocated <code>SequencedCommand</code> in the ring, mutate in place.</td>
+      </tr>
+      <tr>
+        <td>R14</td>
+        <td>Weak pipeline tests</td>
+        <td><code>burstReordersCriticalOrdersFirst</code> only checks qty ≥ 3. Assert trade/resting order ids in expected sequence.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Suggested next sitting</h3>
+  <p>R1–R3 are in. Next useful slice is <strong>R4</strong> (one apply/journal helper) or <strong>R5</strong> (extract Journaled).</p>
+
+  <div class="card">
+    <strong>Do not refactor for its own sake</strong>
+    <p>
+      TREE vs FAST duplication is intentional — two implementations of <code>OrderBookView</code> so you can compare.
+      Do not merge them. Do not add Spring, interfaces-for-everything, or a shared lock “to be safe”.
+    </p>
+  </div>
+</section>
+
+<section id="run">
+  <h2>17. Run the project</h2>
+  <pre>cd ~/Projects/clob-lab
+./bootstrap.sh
+
+./gradlew test
+./gradlew runDemo
+./gradlew runPipeline    # cloud-exchange pipeline (2024+ patterns)
+./gradlew runLoadTest
+./gradlew jmh
+
+# Learning path + refactor backlog: docs/guide.html#learn
+open docs/guide.html</pre>
+</section>
+
+<section id="code">
+  <h2>18. Code map</h2>
+  <table>
+    <thead>
+      <tr><th>File</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>book/FastOrderBook.java</code></td><td>Array ticks + order pool (default)</td></tr>
+      <tr><td><code>book/OrderBook.java</code></td><td>TreeMap book (learning / compare)</td></tr>
+      <tr><td><code>book/PriceLevel.java</code></td><td>FIFO queue at one price (TREE)</td></tr>
+      <tr><td><code>book/FastLevel.java</code></td><td>Head/tail + aggregates at one tick (FAST)</td></tr>
+      <tr><td><code>book/PooledOrder.java</code></td><td>Mutable order node in intrusive list</td></tr>
+      <tr><td><code>book/OrderPool.java</code></td><td>Fixed-size pool + free stack</td></tr>
+      <tr><td><code>book/OrderBookView.java</code></td><td>Shared book API for both implementations</td></tr>
+      <tr><td><code>engine/MatchingEngine.java</code></td><td>Limit, market, IOC, FOK + Journaled wrapper</td></tr>
+      <tr><td><code>marketdata/L2Snapshot.java</code></td><td>L2 depth snapshot model</td></tr>
+      <tr><td><code>journal/EventJournal.java</code></td><td>Append-only event log</td></tr>
+      <tr><td><code>journal/EventReplayer.java</code></td><td>Rebuild engine from log</td></tr>
+      <tr><td><code>model/OrderType.java</code></td><td>LIMIT, MARKET, IOC, FOK</td></tr>
+      <tr><td><code>Main.java</code></td><td>Interactive demo</td></tr>
+      <tr><td><code>bench/MatchBenchmark.java</code></td><td>Simple latency histogram</td></tr>
+      <tr><td><code>bench/MatchEngineBenchmark.java</code></td><td>JMH benchmarks — FAST book (src/jmh)</td></tr>
+      <tr><td><code>bench/BookKindBenchmark.java</code></td><td>JMH FAST vs TREE comparison (src/jmh)</td></tr>
+      <tr><td><code>loadtest/LoadTestRunner.java</code></td><td>Sustained load test CLI</td></tr>
+      <tr><td><code>exchange/CloudExchange.java</code></td><td>Full cloud-style pipeline</td></tr>
+      <tr><td><code>pipeline/Sequencer.java</code></td><td>Global ingress sequencing</td></tr>
+      <tr><td><code>pipeline/PriorityIngress.java</code></td><td>FancyPQ burst reorder</td></tr>
+      <tr><td><code>pipeline/RingBuffer.java</code></td><td>SPSC inter-stage queue</td></tr>
+      <tr><td><code>marketdata/FairMarketDataPublisher.java</code></td><td>Fair outbound MD batch</td></tr>
+      <tr><td><code>pipeline/PipelineRunner.java</code></td><td>Pipeline demo main</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+
+<footer>
+  clob-lab · ~/Projects/clob-lab · built for learning CLOB matching &amp; low-latency concepts
+</footer>
+
+</body>
+</html>
