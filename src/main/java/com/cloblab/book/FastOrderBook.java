@@ -101,6 +101,10 @@ public final class FastOrderBook implements OrderBookView {
 
     @Override
     public void addResting(long orderId, Side side, long priceTicks, long quantity, long sequence) {
+        if (priceTicks < tickBase || priceTicks >= tickBase + (long) tickSpan) {
+            throw new IllegalArgumentException(
+                    "priceTicks " + priceTicks + " outside book range [" + tickBase + ", " + (tickBase + (long) tickSpan) + ")");
+        }
         int slot = pool.acquire();
         PooledOrder node = pool.get(slot);
         node.orderId = orderId;

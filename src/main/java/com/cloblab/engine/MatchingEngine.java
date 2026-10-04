@@ -62,6 +62,7 @@ public final class MatchingEngine implements OrderBookView.MatchSink {
     }
 
     public MatchResult submitFokOrder(long orderId, Side side, long priceTicks, long quantity) {
+        validate(orderId, side, priceTicks, quantity, false);
         if (book.availableAtOrBetter(side, priceTicks) < quantity) {
             return matchResult.captureEmpty(quantity, false, OrderType.FOK);
         }
@@ -70,6 +71,24 @@ public final class MatchingEngine implements OrderBookView.MatchSink {
 
     public boolean cancel(long orderId) {
         return book.cancel(orderId);
+    }
+
+    private void validate(long orderId, Side side, long priceTicks, long quantity, boolean allowRest) {
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("quantity must be positive: " + quantity);
+        }
+        if (orderId <= 0) {
+            throw new IllegalArgumentException("orderId must be positive: " + orderId);
+        }
+        if (book.contains(orderId)) {
+            throw new IllegalArgumentException("duplicate orderId: " + orderId + " (cancel or fill it first)");
+        }
+        if (allowRest && priceTicks <= 0) {
+            throw new IllegalArgumentException("limit/market price must be positive: " + priceTicks);
+        }
+        if (side == null) {
+            throw new IllegalArgumentException("side must not be null");
+        }
     }
 
     @Override
@@ -84,6 +103,7 @@ public final class MatchingEngine implements OrderBookView.MatchSink {
             long quantity,
             boolean allowRest,
             OrderType orderType) {
+        validate(orderId, side, limitPriceTicks, quantity, allowRest);
         tradeBuffer.clear();
         long takerSequence = sequence++;
         currentTakerOrderId = orderId;
