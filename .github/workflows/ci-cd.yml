@@ -1,0 +1,131 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-prs: true
+  # sequential on main, superseded PR runs are the point; do NOT cancel main pushes
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'build.gradle.kts'
+              - 'settings.gradle.kts'
+              - 'gradle/**'
+              - 'gradlew'
+              - '.github/workflows/*.yml'
+            docs:
+              - 'README.md'
+              - 'docs/**'
+
+  test:
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Setup Gradle (cache daemon, wrapper, dependencies)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # PRs: read-only cache so branch builds don't thrash the shared cache
+          cache-read-only: ${{ github.event_name != 'push' }}
+      - name: Compile (fail fast on ErrorProne/lint)
+        run: ./gradlew compileJava compileTestJava --stacktrace --console=plain
+      - name: Test + coverage gate
+        run: ./gradlew test jacocoTestCoverageVerification --stacktrace --console=plain
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ github.run_id }}
+          path: build/reports/tests/test/
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+          path: build/reports/jacoco/
+          retention-days: 14
+
+  bench:
+    # Performance regression smoke - runs the configured fast JMH set (warmup 2, iterations 3)
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.event_name != 'push' }}
+      - name: JMH benchmark suite
+        run: ./gradlew jmh --stacktrace --console=plain
+      - name: Publish benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmh-results-${{ github.run_id }}
+          path: build/reports/jmh/
+          retention-days: 14
+
+  docs:
+    needs: changes
+    # Docs-only PRs skip build jobs entirely; this placeholder shows it was intentional
+    if: ${{ needs.changes.outputs.docs == 'true' && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docs-only change summary
+        run: echo "Docs changed; no build required. Guide at docs/guide.html."
+
+  release:
+    needs: [test, bench]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build distribution (installDist)
+        run: ./gradlew installDist --stacktrace --console=plain
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp -r build/install/clob-lab/* dist/
+          tar -czf clob-lab-${{ github.sha }}.tar.gz -C dist .
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clob-lab-dist-${{ github.sha }}
+          path: clob-lab-${{ github.sha }}.tar.gz
+          retention-days: 30
