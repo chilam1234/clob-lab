@@ -114,8 +114,11 @@ class GatewayServerTest {
                 assertEquals(2L, ((Number) tradeOrL2.get("taker")).longValue());
                 assertEquals(1L, ((Number) tradeOrL2.get("maker")).longValue());
             } else {
-                // l2 flush preceded trade; ensure seq keeps increasing
-                assertTrue(((Number) tradeOrL2.get("seq")).longValue() > previousSeq);
+                // Either a legacy l2 ("seq") or a Binance-dialect depth frame ("lastUpdateId");
+                // both must advance monotonically past the previous frame.
+                Long seq = seqOf(tradeOrL2);
+                assertNotNull(seq, "frame must carry seq or lastUpdateId: " + tradeOrL2);
+                assertTrue(seq > previousSeq);
             }
         }
     }
@@ -175,6 +178,23 @@ class GatewayServerTest {
         assertEquals(null, GatewayServer.allowedStaticPath("/app.js"));
         assertEquals("text/javascript; charset=UTF-8", GatewayServer.contentType("assets/a.js"));
         assertEquals("text/css; charset=UTF-8", GatewayServer.contentType("assets/a.css"));
+    }
+
+
+    /** Frame seq accessor across both protocols: legacy "seq" or Binance "lastUpdateId". */
+    private static Long seqOf(Map<String, Object> frame) {
+        Object seq = frame.get("seq");
+        if (seq instanceof Number n) {
+            return n.longValue();
+        }
+        // Binance envelope: {"stream":..., "data":{"lastUpdateId":...}}
+        if (frame.get("data") instanceof Map<?, ?> data) {
+            Object lastUpdateId = data.get("lastUpdateId");
+            if (lastUpdateId instanceof Number n2) {
+                return n2.longValue();
+            }
+        }
+        return null;
     }
 
     private static void clientText(OutputStream out, String json) throws IOException {

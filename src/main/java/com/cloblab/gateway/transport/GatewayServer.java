@@ -3,6 +3,7 @@ package com.cloblab.gateway.transport;
 import com.cloblab.gateway.Gateway;
 import com.cloblab.gateway.GatewayFrame;
 import com.cloblab.gateway.GatewayResult;
+import com.cloblab.gateway.MockMarketMaker;
 import com.cloblab.marketdata.BookLevel;
 import com.cloblab.marketdata.L2Snapshot;
 import com.cloblab.model.Side;
@@ -52,6 +53,8 @@ public final class GatewayServer {
     private final CopyOnWriteArrayList<WsSession> sessions = new CopyOnWriteArrayList<>();
     private final AtomicBoolean subscribed = new AtomicBoolean();
     private final AtomicBoolean running = new AtomicBoolean();
+    private MockMarketMaker mockMaker;
+    private final boolean startMock;
 
     private HttpServer httpServer;
     private ServerSocket wsListener;
@@ -60,12 +63,30 @@ public final class GatewayServer {
     private int wsPort;
 
     public GatewayServer() {
-        this(new Gateway(DEFAULT_SYMBOLS, DEFAULT_RING), defaultUiDir());
+        this(new Gateway(DEFAULT_SYMBOLS, DEFAULT_RING), defaultUiDir(), resolveMockArg());
     }
 
     public GatewayServer(Gateway gateway, Path uiDir) {
+        this(gateway, uiDir, false);
+    }
+
+    public GatewayServer(Gateway gateway, Path uiDir, boolean startMock) {
         this.gateway = gateway;
         this.uiDir = uiDir;
+        this.startMock = startMock;
+    }
+
+    /** CLI: --no-mock disables the synthetic market maker. */
+    static boolean resolveMockArg() {
+        for (String arg : System.getProperty("clob.mock", "").split(",", -1)) {
+            if (arg.isBlank()) {
+                continue;
+            }
+            if (arg.equals("no-mock") || arg.equals("false")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Prefer the built React app (ui/dist), fall back to docs/ui stub. */
@@ -109,15 +130,26 @@ public final class GatewayServer {
         // docker/firewall), any free port when the HTTP port was auto-assigned (tests).
         wsListener = new ServerSocket(listenPort == 0 ? 0 : listenPort + 1);
         wsPort = wsListener.getLocalPort();
+
+        if (startMock) {
+            mockMaker = new MockMarketMaker(gateway, 0, 100);
+            mockMaker.start();
+        }
+
+        // Publish running BEFORE the acceptor starts: the accept loop checks this flag and
+        // would otherwise exit immediately in a start/accept race (observed once).
+        running.set(true);
         Thread acceptor = new Thread(this::acceptLoop, "clob-ws-accept");
         acceptor.setDaemon(true);
         acceptor.start();
-
-        running.set(true);
     }
 
     public synchronized void stop() {
         running.set(false);
+        if (mockMaker != null) {
+            mockMaker.stop();
+            mockMaker = null;
+        }
         for (WsSession session : sessions) {
             session.closeQuietly();
         }
@@ -279,6 +311,8 @@ public final class GatewayServer {
     }
 
     private void acceptLoop() {
+        Thread.currentThread().setUncaughtExceptionHandler(
+                (t, e) -> System.err.println("[clob-ws] acceptor died: " + e));
         while (running.get()) {
             try {
                 Socket socket = wsListener.accept();
@@ -394,15 +428,34 @@ public final class GatewayServer {
                 continue;
             }
             try {
+                long bookSeq = session.nextSeq();
                 for (Trade trade : frame.trades()) {
-                    sendText(session, tradeJson(session.nextSeq(), trade));
+                    long tradeSeq = session.nextSeq();
+                    sendText(session, tradeJson(tradeSeq, trade));
+                    sendText(session, binanceAggTradeJson(tradeSeq,
+                            trade.makerOrderId(), trade.takerOrderId(),
+                            trade.priceTicks(), trade.quantity()));
                 }
-                sendText(session, l2Json(session.nextSeq(), snapshot(session.symbolId)));
+                sendText(session, l2Json(bookSeq, snapshot(session.symbolId)));
+                sendBinanceDepthThrottled(session);
             } catch (RuntimeException e) {
                 session.closeQuietly();
                 sessions.remove(session);
             }
         }
+    }
+
+    private static final long DEPTH_INTERVAL_NANOS = 500_000_000L; // 500 ms
+
+    /** Binance depth10 snapshot at most every 500ms per session. */
+    private void sendBinanceDepthThrottled(WsSession session) {
+        long now = System.nanoTime();
+        long last = session.lastDepthSentNano;
+        if (last != 0 && now - last < DEPTH_INTERVAL_NANOS) {
+            return;
+        }
+        session.lastDepthSentNano = now;
+        sendText(session, binanceDepth10Json(session.nextSeq(), snapshot(session.symbolId)));
     }
 
     private L2Snapshot snapshot(int symbolId) {
@@ -443,6 +496,65 @@ public final class GatewayServer {
                 + ",\"px\":" + trade.priceTicks()
                 + ",\"qty\":" + trade.quantity()
                 + '}';
+    }
+
+    /**
+     * Binance-dialect frames (ADR-0006): let Binance-compatible clients
+     * (rust-project/trading-ui) consume the same event stream.
+     * Envelope: {"stream":"clobusdt@aggTrade","data":{...aggTrade...}}
+     */
+    static final String BINANCE_SYMBOL = "clobusdt";
+    private static final long SYNTH_BASE = 1_000_000L;
+    static final long MOCK_ID_BASE = 1_000_000L; // MockMarketMaker's BASE_ID; keep in sync
+
+    /**
+     * "m" (buyer-is-maker) semantics: with clob-lab's UI id scheme (odd=BUY, even=SELL)
+     * the resting maker's side is decodable only for UI ids; synthetic (mock) ids are
+     * assumed to be standard two-sided quotes so we use the taker parity heuristic
+     * (taker odd = BUY). Good enough for tape coloring; exact side tagging is a
+     * follow-up if needed (would require carrying taker side on Trade).
+     */
+    static String binanceAggTradeJson(long seq, long makerOrderId, long takerOrderId, long priceTicks, long quantity) {
+        boolean takerIsBuy = takerOrderId < SYNTH_BASE ? takerOrderId % 2 == 1 : true;
+        // m = buyerIsMaker = NOT takerIsBuy (taker bought => buyer is the taker => buyer not maker)
+        String m = Boolean.toString(!takerIsBuy);
+        return "{\"stream\":\"" + BINANCE_SYMBOL + "@aggTrade\",\"data\":{"
+                + "\"e\":\"aggTrade\""
+                + ",\"a\":" + seq
+                + ",\"s\":\"" + BINANCE_SYMBOL.toUpperCase(Locale.ROOT) + "\""
+                + ",\"p\":\"" + priceTicks + "\""
+                + ",\"q\":\"" + quantity + "\""
+                + ",\"m\":" + m
+                + ",\"E\":" + System.currentTimeMillis()
+                + "}}";
+    }
+
+    static String binanceDepth10Json(long seq, L2Snapshot snap) {
+        StringBuilder sb = new StringBuilder(192);
+        sb.append("{\"stream\":\"").append(BINANCE_SYMBOL).append("@depth10@100ms\",\"data\":{");
+        sb.append("\"lastUpdateId\":").append(seq);
+        sb.append(",\"bids\":");
+        appendLevelRows(sb, snap.bids());
+        sb.append(",\"asks\":");
+        appendLevelRows(sb, snap.asks());
+        sb.append("}}");
+        return sb.toString();
+    }
+
+    /** Binance depth rows: [px, qty] as strings. */
+    private static void appendLevelRows(StringBuilder sb, List<BookLevel> levels) {
+        sb.append('[');
+        for (int i = 0; i < levels.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            BookLevel level = levels.get(i);
+            sb.append('[')
+                    .append('"').append(level.priceTicks()).append('"').append(',')
+                    .append('"').append(level.quantity()).append('"')
+                    .append(']');
+        }
+        sb.append(']');
     }
 
     static String ackJson(long seq, GatewayResult result) {
@@ -514,6 +626,7 @@ public final class GatewayServer {
         final OutputStream out;
         private final Socket socket;
         final AtomicLong seq = new AtomicLong();
+        volatile long lastDepthSentNano;
         volatile boolean open = true;
 
         WsSession(int symbolId, InputStream in, OutputStream out, Socket socket) {
