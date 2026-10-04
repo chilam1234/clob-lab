@@ -89,6 +89,13 @@ tasks.register<JavaExec>("runPipeline") {
     mainClass.set("com.cloblab.pipeline.PipelineRunner")
 }
 
+tasks.register<JavaExec>("runUi") {
+    group = "application"
+    description = "Serve the trade UI + WebSocket gateway on http://localhost:8080"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.cloblab.gateway.transport.GatewayServer")
+}
+
 tasks.register<JavaExec>("runGateway") {
     group = "application"
     description = "Run cloud-exchange gateway demo (threaded shards, per-frame MD)"

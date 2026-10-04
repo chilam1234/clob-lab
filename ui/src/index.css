@@ -1,0 +1,45 @@
+@import "tailwindcss";
+@import "../theme.css";
+
+@theme inline {
+  --color-foreground: var(--color-text);
+  --color-card: var(--color-surface-raised);
+  --color-card-foreground: var(--color-text);
+  --color-popover: var(--color-surface-raised);
+  --color-popover-foreground: var(--color-text);
+  --color-primary-foreground: var(--color-surface-raised);
+  --color-secondary-foreground: var(--color-text);
+  --color-muted: var(--color-surface);
+  --color-muted-foreground: var(--color-text-muted);
+  --color-accent: var(--color-surface);
+  --color-accent-foreground: var(--color-text);
+  --color-destructive: var(--color-accent-alert);
+  --color-input: var(--color-border);
+  --color-ring: var(--color-primary);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+    box-shadow: none;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-background);
+    color: var(--color-text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1,
+  h2 {
+    font-family: Georgia, "Times New Roman", serif;
+  }
+}
