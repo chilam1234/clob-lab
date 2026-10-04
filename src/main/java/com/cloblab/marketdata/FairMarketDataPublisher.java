@@ -26,16 +26,20 @@ public final class FairMarketDataPublisher {
         subscribers.add(subscriber);
     }
 
-    public void stageTrade(Trade trade) {
+    public synchronized void stageTrade(Trade trade) {
         pendingTrades.add(trade);
     }
 
-    public void stageSnapshot(L2Snapshot snapshot) {
+    public synchronized void stageSnapshot(L2Snapshot snapshot) {
         pendingSnapshots.add(snapshot);
     }
 
-    /** Release staged updates to all subscribers simultaneously. */
-    public FairRelease flush() {
+    /**
+     * Release staged updates to all subscribers simultaneously.
+     * Used both as {@link com.cloblab.exchange.CloudExchange#flushBatch()} batch mode and as
+     * the per-frame flush requested by a dedicated shard consumer after each command.
+     */
+    public synchronized FairRelease flush() {
         if (pendingTrades.isEmpty() && pendingSnapshots.isEmpty()) {
             return null;
         }

@@ -12,14 +12,23 @@ import com.cloblab.pipeline.SequencedCommand;
 import com.cloblab.protocol.InboundCommand;
 
 /**
- * One symbol, one matcher thread model: ring buffer feeds a dedicated {@link MatchingEngine}.
+ * One symbol, one matcher thread: the ring is SPSC (producer = {@link CloudExchange} routing).
+ *
+ * <p>{@link #processAll()} remains the synchronous drain used by {@link CloudExchange#flushBatch()}.
+ * {@link #start()} runs a dedicated busy-spin consumer that applies the same {@code poll() + apply()}
+ * path and requests a fair MD flush after each command.
  */
 public final class SymbolShard {
+    private static final long SHUTDOWN_JOIN_MILLIS = 5_000L;
+
     private final int symbolId;
     private final MatchingEngine engine;
     private final RingBuffer<SequencedCommand> inboundRing;
     private final FairMarketDataPublisher publisher;
     private final EventJournal journal;
+
+    private volatile boolean running;
+    private Thread consumer;
 
     public SymbolShard(int symbolId, int ringCapacity, FairMarketDataPublisher publisher, EventJournal journal) {
         this.symbolId = symbolId;
@@ -27,6 +36,40 @@ public final class SymbolShard {
         this.inboundRing = new RingBuffer<>(ringCapacity);
         this.publisher = publisher;
         this.journal = journal;
+    }
+
+    /**
+     * Start the dedicated SPSC consumer thread. No-op if already running.
+     * Matching semantics are unchanged: the thread is the sole caller of {@link RingBuffer#poll()}.
+     */
+    public synchronized void start() {
+        if (consumer != null && consumer.isAlive()) {
+            return;
+        }
+        running = true;
+        consumer = new Thread(this::runLoop, "clob-shard-" + symbolId);
+        consumer.setDaemon(true);
+        consumer.start();
+    }
+
+    /**
+     * Stop the consumer: clear the volatile {@code running} flag, join with timeout, and rely on
+     * the thread to drain remaining ring commands before exit so in-flight work is not dropped.
+     */
+    public void shutdown() {
+        Thread thread;
+        synchronized (this) {
+            running = false;
+            thread = consumer;
+        }
+        if (thread == null) {
+            return;
+        }
+        try {
+            thread.join(SHUTDOWN_JOIN_MILLIS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     public int symbolId() {
@@ -44,7 +87,7 @@ public final class SymbolShard {
         return inboundRing.offer(command);
     }
 
-    /** Drain ring and apply to matcher — single-threaded consumer. */
+    /** Drain ring and apply to matcher — single-threaded consumer (synchronous / test path). */
     public int processAll() {
         int processed = 0;
         SequencedCommand sequenced;
@@ -53,6 +96,37 @@ public final class SymbolShard {
             processed++;
         }
         return processed;
+    }
+
+    private void runLoop() {
+        while (running) {
+            SequencedCommand sequenced = inboundRing.poll();
+            if (sequenced == null) {
+                Thread.onSpinWait();
+                continue;
+            }
+            consumeFrame(sequenced);
+        }
+        SequencedCommand remaining;
+        while ((remaining = inboundRing.poll()) != null) {
+            consumeFrame(remaining);
+        }
+    }
+
+    /**
+     * Apply one command then request a per-frame fair MD release. {@link MatchResult} is consumed
+     * here (trades materialized) before the next apply reuses the engine scratch result.
+     */
+    private void consumeFrame(SequencedCommand sequenced) {
+        try {
+            apply(sequenced);
+        } catch (IllegalArgumentException ignored) {
+            // Validation belongs at Gateway.submit as REJECTED; keep the consumer alive.
+            if (ignored.getMessage() == null) {
+                throw ignored;
+            }
+        }
+        publisher.flush();
     }
 
     private void apply(SequencedCommand sequenced) {

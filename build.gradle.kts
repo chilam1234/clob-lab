@@ -89,6 +89,13 @@ tasks.register<JavaExec>("runPipeline") {
     mainClass.set("com.cloblab.pipeline.PipelineRunner")
 }
 
+tasks.register<JavaExec>("runGateway") {
+    group = "application"
+    description = "Run cloud-exchange gateway demo (threaded shards, per-frame MD)"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.cloblab.gateway.GatewayRunner")
+}
+
 jmh {
     jmhVersion.set("1.37")
     warmupIterations.set(2)

@@ -12,7 +12,7 @@ public final class EventJournal {
     private final AtomicLong nextEventId = new AtomicLong(1);
     private final List<OrderEvent> events = new ArrayList<>();
 
-    public OrderEvent append(OrderEvent event) {
+    public synchronized OrderEvent append(OrderEvent event) {
         events.add(event);
         return event;
     }
@@ -37,11 +37,11 @@ public final class EventJournal {
         return append(OrderEvent.cancel(nextEventId.getAndIncrement(), orderId));
     }
 
-    public List<OrderEvent> events() {
+    public synchronized List<OrderEvent> events() {
         return Collections.unmodifiableList(events);
     }
 
-    public int size() {
+    public synchronized int size() {
         return events.size();
     }
 }

@@ -51,6 +51,23 @@ public final class CloudExchange {
     }
 
     /**
+     * Start each shard's dedicated consumer thread. Tests keep the default synchronous
+     * {@link #flushBatch()} path and must not call this.
+     */
+    public void start() {
+        for (SymbolShard shard : router.shards()) {
+            shard.start();
+        }
+    }
+
+    /** Stop every shard consumer, draining in-flight ring commands on each thread. */
+    public void shutdown() {
+        for (SymbolShard shard : router.shards()) {
+            shard.shutdown();
+        }
+    }
+
+    /**
      * Queue a command for the next {@link #flushBatch()}.
      * Ingress is unbounded, so this always returns {@code true}.
      * Ring back-pressure is reported as {@link ExchangeTick#deferred()} after flush.

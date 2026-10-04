@@ -28,6 +28,14 @@ public record InboundCommand(
         return new InboundCommand(symbolId, Kind.SUBMIT, orderId, side, priceTicks, quantity, OrderType.IOC);
     }
 
+    public static InboundCommand submitMarket(int symbolId, long orderId, Side side, long quantity) {
+        return new InboundCommand(symbolId, Kind.SUBMIT, orderId, side, null, quantity, OrderType.MARKET);
+    }
+
+    public static InboundCommand submitFok(int symbolId, long orderId, Side side, long priceTicks, long quantity) {
+        return new InboundCommand(symbolId, Kind.SUBMIT, orderId, side, priceTicks, quantity, OrderType.FOK);
+    }
+
     public static InboundCommand cancel(int symbolId, long orderId) {
         return new InboundCommand(symbolId, Kind.CANCEL, orderId, null, null, 0, null);
     }
