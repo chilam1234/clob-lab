@@ -7,11 +7,16 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Append-only log of order events. Enables deterministic replay.
+ *
+ * <p>Single-instance / test path: {@link #append} is synchronized for multi-threaded
+ * callers. Hot-path exchange journaling uses {@link StripedEventJournal} instead (SPSC
+ * per symbol, no monitor).
  */
-public final class EventJournal {
+public final class EventJournal implements OrderEventSink {
     private final AtomicLong nextEventId = new AtomicLong(1);
     private final List<OrderEvent> events = new ArrayList<>();
 
+    @Override
     public synchronized OrderEvent append(OrderEvent event) {
         events.add(event);
         return event;

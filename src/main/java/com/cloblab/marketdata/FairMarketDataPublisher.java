@@ -9,6 +9,16 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * Onyx/Jasper-style outbound fairness lite: batch market-data releases so all
  * subscribers observe the same update at the same flush (minimal spread).
+ *
+ * <p><b>SPSC ownership.</b> Each instance is owned by exactly one symbol shard thread.
+ * Only that thread may call {@link #stageTrade}, {@link #stageSnapshot}, or {@link #flush}.
+ * {@link com.cloblab.exchange.CloudExchange} holds one publisher per symbolId; cross-shard
+ * staging must not share an instance. Subscribe may be called from any thread
+ * (CopyOnWriteArrayList).
+ *
+ * <p><b>Subscriber contract.</b> {@link Subscriber#onFairRelease} must not block — enqueue
+ * only (e.g. GatewayServer fanout queue). Holding the subscriber callback stalls the
+ * owning shard's match loop.
  */
 public final class FairMarketDataPublisher {
     private final CopyOnWriteArrayList<Subscriber> subscribers = new CopyOnWriteArrayList<>();
@@ -17,6 +27,9 @@ public final class FairMarketDataPublisher {
     private long lastReleaseNano;
 
     public interface Subscriber {
+        /**
+         * Deliver one fair release. Must not block; enqueue and return.
+         */
         void onFairRelease(FairRelease release);
     }
 
@@ -26,11 +39,13 @@ public final class FairMarketDataPublisher {
         subscribers.add(subscriber);
     }
 
-    public synchronized void stageTrade(Trade trade) {
+    /** Stage a trade. Owning shard thread only (SPSC). */
+    public void stageTrade(Trade trade) {
         pendingTrades.add(trade);
     }
 
-    public synchronized void stageSnapshot(L2Snapshot snapshot) {
+    /** Stage an L2 snapshot. Owning shard thread only (SPSC). */
+    public void stageSnapshot(L2Snapshot snapshot) {
         pendingSnapshots.add(snapshot);
     }
 
@@ -38,11 +53,12 @@ public final class FairMarketDataPublisher {
      * Release staged updates to all subscribers simultaneously.
      * Used both as {@link com.cloblab.exchange.CloudExchange#flushBatch()} batch mode and as
      * the per-frame flush requested by a dedicated shard consumer after each command.
+     * Owning shard thread only (SPSC).
      */
-    public synchronized FairRelease flush() { return flush(-1); }
+    public FairRelease flush() { return flush(-1); }
 
-    /** Per-shard flush: the release carries the shard's symbolId. */
-    public synchronized FairRelease flush(int symbolId) {
+    /** Per-shard flush: the release carries the shard's symbolId. Owning shard thread only. */
+    public FairRelease flush(int symbolId) {
         if (pendingTrades.isEmpty() && pendingSnapshots.isEmpty()) {
             return null;
         }

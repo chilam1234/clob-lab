@@ -79,7 +79,7 @@ class SymbolShardThreadTest {
     void cloudExchangeStartAndShutdownJoinShardThreads() throws Exception {
         CloudExchange exchange = new CloudExchange(1, 8, 10);
         CountDownLatch released = new CountDownLatch(1);
-        exchange.marketData().subscribe(r -> released.countDown());
+        exchange.subscribeMarketData(r -> released.countDown());
         exchange.start();
         try {
             assertTrue(exchange.router().shard(0).enqueue(

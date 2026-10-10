@@ -48,7 +48,7 @@ public final class Gateway {
      * (that would violate the shard ring's SPSC contract).
      */
     public void subscribe(Consumer<GatewayFrame> subscriber) {
-        exchange.marketData().subscribe(release -> subscriber.accept(GatewayFrame.from(release)));
+        exchange.subscribeMarketData(release -> subscriber.accept(GatewayFrame.from(release)));
     }
 
     public GatewayResult submitLimit(int symbolId, long orderId, Side side, long priceTicks, long quantity) {

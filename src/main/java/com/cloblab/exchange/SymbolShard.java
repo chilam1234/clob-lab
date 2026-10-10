@@ -1,8 +1,8 @@
 package com.cloblab.exchange;
 
 import com.cloblab.engine.MatchingEngine;
-import com.cloblab.journal.EventJournal;
 import com.cloblab.journal.OrderEvent;
+import com.cloblab.journal.OrderEventSink;
 import com.cloblab.marketdata.FairMarketDataPublisher;
 import com.cloblab.marketdata.L2Snapshot;
 import com.cloblab.model.MatchResult;
@@ -17,6 +17,10 @@ import com.cloblab.protocol.InboundCommand;
  * <p>{@link #processAll()} remains the synchronous drain used by {@link CloudExchange#flushBatch()}.
  * {@link #start()} runs a dedicated busy-spin consumer that applies the same {@code poll() + apply()}
  * path and requests a fair MD flush after each command.
+ *
+ * <p>Owns exactly one {@link FairMarketDataPublisher} and one journal stripe ({@link OrderEventSink});
+ * staging/flush/append are unsynchronized SPSC calls from this shard's consumer (or the
+ * synchronous {@link #processAll()} caller).
  */
 public final class SymbolShard {
     private static final long SHUTDOWN_JOIN_MILLIS = 5_000L;
@@ -25,12 +29,13 @@ public final class SymbolShard {
     private final MatchingEngine engine;
     private final RingBuffer<SequencedCommand> inboundRing;
     private final FairMarketDataPublisher publisher;
-    private final EventJournal journal;
+    private final OrderEventSink journal;
 
     private volatile boolean running;
     private Thread consumer;
 
-    public SymbolShard(int symbolId, int ringCapacity, FairMarketDataPublisher publisher, EventJournal journal) {
+    public SymbolShard(
+            int symbolId, int ringCapacity, FairMarketDataPublisher publisher, OrderEventSink journal) {
         this.symbolId = symbolId;
         this.engine = new MatchingEngine();
         this.inboundRing = new RingBuffer<>(ringCapacity);
@@ -159,6 +164,7 @@ public final class SymbolShard {
     /**
      * Journal at execution time using the global ingress sequence as the event ID so a
      * replayer can restore execution order even though FancyPQ reordered the batch.
+     * Appends to this shard's stripe only — no global journal monitor.
      */
     private void journalExecution(SequencedCommand sequenced) {
         InboundCommand command = sequenced.command();

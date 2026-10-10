@@ -1,6 +1,6 @@
 package com.cloblab.exchange;
 
-import com.cloblab.journal.EventJournal;
+import com.cloblab.journal.StripedEventJournal;
 import com.cloblab.marketdata.FairMarketDataPublisher;
 import com.cloblab.pipeline.PriorityIngress;
 import com.cloblab.pipeline.SequencedCommand;
@@ -15,34 +15,51 @@ import java.util.Map;
 /**
  * Cloud-exchange pipeline (2024+ research applied):
  * ingress → global sequencer → FancyPQ burst reorder → sharded matchers → fair MD fanout → journal.
+ *
+ * <p>Per-symbol {@link FairMarketDataPublisher} instances and a {@link StripedEventJournal}
+ * remove cross-shard monitor contention on the hot path (ADR-0010).
  */
 public final class CloudExchange {
     private final Sequencer sequencer = new Sequencer();
     private final PriorityIngress priorityIngress;
     private final ExchangeRouter router;
-    private final FairMarketDataPublisher marketData;
-    private final EventJournal aggregateJournal = new EventJournal();
+    private final FairMarketDataPublisher[] marketDataBySymbol;
+    private final StripedEventJournal aggregateJournal;
     private final List<SequencedCommand> ingressBatch = new ArrayList<>();
 
     public CloudExchange(int symbolCount, int ringCapacityPerShard, int burstThreshold) {
         this.priorityIngress = new PriorityIngress(burstThreshold);
-        this.marketData = new FairMarketDataPublisher();
+        this.marketDataBySymbol = new FairMarketDataPublisher[symbolCount];
+        this.aggregateJournal = new StripedEventJournal(symbolCount);
         SymbolShard[] shards = new SymbolShard[symbolCount];
         for (int i = 0; i < symbolCount; i++) {
-            shards[i] = new SymbolShard(i, ringCapacityPerShard, marketData, aggregateJournal);
+            marketDataBySymbol[i] = new FairMarketDataPublisher();
+            shards[i] = new SymbolShard(
+                    i, ringCapacityPerShard, marketDataBySymbol[i], aggregateJournal.stripe(i));
         }
         this.router = new ExchangeRouter(shards);
     }
 
-    public FairMarketDataPublisher marketData() {
-        return marketData;
+    /** Per-symbol publisher owned by that symbol's shard (SPSC). */
+    public FairMarketDataPublisher marketData(int symbolId) {
+        return marketDataBySymbol[symbolId];
+    }
+
+    /**
+     * Subscribe to fair releases from every per-symbol publisher.
+     * Callbacks run on the owning shard thread (or flushBatch caller); must not block.
+     */
+    public void subscribeMarketData(FairMarketDataPublisher.Subscriber subscriber) {
+        for (FairMarketDataPublisher publisher : marketDataBySymbol) {
+            publisher.subscribe(subscriber);
+        }
     }
 
     public ExchangeRouter router() {
         return router;
     }
 
-    public EventJournal journal() {
+    public StripedEventJournal journal() {
         return aggregateJournal;
     }
 
@@ -114,7 +131,13 @@ public final class CloudExchange {
 
         ingressBatch.clear();
         ingressBatch.addAll(deferred);
-        var release = marketData.flush();
+        FairMarketDataPublisher.FairRelease release = null;
+        for (int symbolId = 0; symbolId < marketDataBySymbol.length; symbolId++) {
+            FairMarketDataPublisher.FairRelease next = marketDataBySymbol[symbolId].flush(symbolId);
+            if (next != null) {
+                release = next;
+            }
+        }
         return new ExchangeTick(routed, processed, deferred.size(), release);
     }
 

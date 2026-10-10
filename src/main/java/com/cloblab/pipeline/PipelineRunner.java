@@ -1,10 +1,8 @@
 package com.cloblab.pipeline;
 
 import com.cloblab.exchange.CloudExchange;
-import com.cloblab.marketdata.FairMarketDataPublisher;
 import com.cloblab.model.Side;
 import com.cloblab.protocol.InboundCommand;
-import com.cloblab.journal.EventJournal;
 
 /**
  * Demo of the 2024+ cloud-exchange pipeline: sequencer, FancyPQ burst, sharded matchers, fair MD.
@@ -12,10 +10,10 @@ import com.cloblab.journal.EventJournal;
 public final class PipelineRunner {
     public static void main(String[] args) {
         CloudExchange exchange = new CloudExchange(/*symbols*/ 2, /*ring*/ 1024, /*burst threshold*/ 3);
-        FairMarketDataPublisher md = exchange.marketData();
 
-        md.subscribe(release -> System.out.println(
-                "Fair MD release @" + release.releaseNano() + "ns"
+        exchange.subscribeMarketData(release -> System.out.println(
+                "Fair MD release symbol=" + release.symbolId()
+                        + " @" + release.releaseNano() + "ns"
                         + " trades=" + release.trades().size()
                         + " snapshots=" + release.snapshots().size()));
 
