@@ -147,6 +147,7 @@ public final class GatewayServer {
         // Publish running BEFORE the acceptor starts: the accept loop checks this flag and
         // would otherwise exit immediately in a start/accept race (observed once).
         running.set(true);
+        startFanout();
         Thread acceptor = new Thread(this::acceptLoop, "clob-ws-accept");
         acceptor.setDaemon(true);
         acceptor.start();
@@ -332,6 +333,10 @@ public final class GatewayServer {
                         } catch (Exception e) {
                             throw new IOException("ws streams failed", e);
                         }
+                        // no read timeout: browsers don't send frames when idle; liveness is
+                        // enforced server-side by ping/pong (fanout thread), not by read timeouts
+                        socket.setSoTimeout(0);
+                        socket.setTcpNoDelay(true);
                         WsSession session = new WsSession(0, streams.in(), streams.out(), socket);
                         sessions.add(session);
                         try {
@@ -348,6 +353,7 @@ public final class GatewayServer {
                         }
                     }
                 });
+                assert unused != null;
             } catch (IOException e) {
                 if (running.get()) {
                     throw new UncheckedIOException("ws accept loop", e);
@@ -374,15 +380,16 @@ public final class GatewayServer {
                     + "Connection: Upgrade\r\n"
                     + "Sec-WebSocket-Accept: " + accept + "\r\n\r\n";
             WsFrames.rawWrite(session.out, handshake.getBytes(StandardCharsets.US_ASCII));
-            sendText(session, helloJson(session.symbolId, session.nextSeq()));
+            // Handshake must be written synchronously before any reads; hello is queued
+            // immediately after so fanout ordering still holds.
+            session.lastPongNanos = System.nanoTime();
+            fanOut(session, helloJson(session.symbolId, session.nextSeq()));
             while (running.get() && session.open) {
                 WsFrames.Frame frame = WsFrames.read(session.in);
                 switch (frame.opcode) {
                     case WsFrames.OP_TEXT -> onClientText(session, new String(frame.payload, StandardCharsets.UTF_8));
                     case WsFrames.OP_PING -> WsFrames.write(session.out, WsFrames.OP_PONG, frame.payload);
-                    case WsFrames.OP_PONG -> {
-                        // unsolicited pong is ignored
-                    }
+                    case WsFrames.OP_PONG -> session.lastPongNanos = System.nanoTime();
                     case WsFrames.OP_CLOSE -> {
                         session.open = false;
                     }
@@ -427,7 +434,7 @@ public final class GatewayServer {
         } catch (RuntimeException e) {
             result = GatewayResult.rejected(e.getMessage() == null ? "error" : e.getMessage());
         }
-        sendText(session, ackJson(session.nextSeq(), result));
+        fanOut(session, ackJson(session.nextSeq(), result));
     }
 
     private void onGatewayFrame(GatewayFrame frame) {
@@ -440,57 +447,170 @@ public final class GatewayServer {
                 long bookSeq = session.nextSeq();
                 for (Trade trade : frame.trades()) {
                     long tradeSeq = session.nextSeq();
-                    sendText(session, tradeJson(tradeSeq, symbolId, trade));
-                    sendText(session, binanceAggTradeJson(symbolId, tradeSeq,
+                    fanOut(session, tradeJson(tradeSeq, symbolId, trade));
+                    fanOut(session, binanceAggTradeJson(symbolId, tradeSeq,
                             trade.makerOrderId(), trade.takerOrderId(),
                             trade.priceTicks(), trade.quantity()));
-                    sendKlineThrottled(session, symbolId, trade);
+                    String kline = klineFrame(session, symbolId, trade);
+                    if (kline != null) {
+                        // may carry "closed\nlive" pair
+                        for (String part : kline.split("\n", -1)) {
+                            fanOut(session, part);
+                        }
+                    }
                 }
-                sendText(session, l2Json(bookSeq, symbolId, snapshot(symbolId)));
-                sendBinanceDepthThrottled(session, symbolId);
+                fanOut(session, l2Json(bookSeq, symbolId, snapshot(symbolId)));
+                String depthPair = sendBinanceDepthThrottled(session, symbolId);
+                if (depthPair != null) {
+                    for (String part : depthPair.split("\n", -1)) {
+                        fanOut(session, part);
+                    }
+                }
             } catch (RuntimeException e) {
-                session.closeQuietly();
-                sessions.remove(session);
+                dropSession(session, "frame");
             }
+        }
+    }
+
+    /**
+     * Fanout is asynchronous: shard threads only queue bytes; a dedicated thread does socket
+     * I/O so a slow/half-dead client cannot wedge matching (the publisher lock must never be
+     * held across a socket write — observed wedge after client network sleep).
+     */
+    private record PendingFrame(WsSession session, String json) {}
+
+    private final java.util.concurrent.ConcurrentLinkedQueue<PendingFrame> outbound =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private static final int MAX_OUTBOUND_QUEUE = 4096;
+    private Thread fanoutThread;
+
+    private void fanOut(WsSession session, String json) {
+        if (!session.open) {
+            return;
+        }
+        while (outbound.size() >= MAX_OUTBOUND_QUEUE) {
+            PendingFrame dropped = outbound.poll();
+            if (dropped == null) {
+                break;
+            }
+            dropSession(dropped.session(), "backlog");
+        }
+        outbound.add(new PendingFrame(session, json));
+    }
+
+    private void startFanout() {
+        fanoutThread = new Thread(this::fanoutLoop, "clob-ws-fanout");
+        fanoutThread.setDaemon(true);
+        fanoutThread.setUncaughtExceptionHandler(
+                (t, e) -> System.err.println("[clob-ws] fanout died: " + e));
+        fanoutThread.start();
+    }
+
+    private static final long PING_INTERVAL_NANOS = 10_000_000_000L;
+    private static final long PONG_DEAD_NANOS = 45_000_000_000L;
+    private long lastPingNanos;
+
+    private void fanoutLoop() {
+        while (running.get()) {
+            PendingFrame frame = outbound.poll();
+            if (frame == null) {
+                if (System.nanoTime() - lastPingNanos > PING_INTERVAL_NANOS) {
+                    pingAllSessions();
+                    lastPingNanos = System.nanoTime();
+                }
+                Thread.onSpinWait();
+                continue;
+            }
+            writeOrDrop(frame.session(), frame.json());
+        }
+    }
+
+    /** Server-initiated ping keeps half-dead clients from squatting a session forever. */
+    private void pingAllSessions() {
+        long now = System.nanoTime();
+        for (WsSession session : sessions) {
+            if (!session.open) {
+                continue;
+            }
+            if (session.lastPongNanos != 0 && now - session.lastPongNanos > PONG_DEAD_NANOS) {
+                dropSession(session, "pong timeout");
+                continue;
+            }
+            try {
+                WsFrames.write(session.out, WsFrames.OP_PING, new byte[0]);
+            } catch (IOException e) {
+                dropSession(session, "ping");
+            }
+        }
+    }
+
+    private void writeOrDrop(WsSession session, String json) {
+        if (!session.open) {
+            return;
+        }
+        try {
+            WsFrames.write(session.out, WsFrames.OP_TEXT, json.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            dropSession(session, "write");
+        }
+    }
+
+    private void dropSession(WsSession session, String reason) {
+        System.err.println("[clob-ws] session dropped: " + reason);
+        session.open = false;
+        sessions.remove(session);
+        try {
+            session.socket().close();
+        } catch (IOException ignored) {
+            // closing
         }
     }
 
     private static final long DEPTH_INTERVAL_NANOS = 1_000_000_000L; // 1 s (UI refresh cadence)
     private static final long KLINE_INTERVAL_NANOS = 1_000_000_000L; // 1 s (UI refresh cadence)
 
-    /** Binance depth10 + bookTicker at most every 500ms per session. */
-    private void sendBinanceDepthThrottled(WsSession session, int symbolId) {
+    /** Build (throttled) depth+ticker pair; null when throttled. */
+    private String sendBinanceDepthThrottled(WsSession session, int symbolId) {
         long now = System.nanoTime();
-        long last = session.lastDepthSentNano;
+        long last = session.lastDepthSentNano[symbolId % session.lastDepthSentNano.length];
         if (last != 0 && now - last < DEPTH_INTERVAL_NANOS) {
-            return;
+            return null;
         }
-        session.lastDepthSentNano = now;
+        session.lastDepthSentNano[symbolId % session.lastDepthSentNano.length] = now;
         var book = gateway.exchange().router().shard(symbolId).engine().book();
         long frameSeq = session.nextSeq();
-        sendText(session, binanceDepth10Json(symbolId, frameSeq, book.snapshot(L2_DEPTH)));
-        sendText(session, binanceBookTickerJson(symbolId, frameSeq, book));
+        return binanceDepth10Json(symbolId, frameSeq, book.snapshot(L2_DEPTH))
+                + "\n" + binanceBookTickerJson(symbolId, frameSeq, book);
     }
 
-    /** Live 1m candle update at most every 100ms per session; klines close at minute boundaries. */
-    private void sendKlineThrottled(WsSession session, int symbolId, Trade trade) {
+    /**
+     * Build (throttled) kline frames for one trade; may return null, a single closed frame,
+     * or a {@code "closed\nlive"} pair. Live updates at most every 1s per session; klines
+     * close at minute boundaries.
+     */
+    private String klineFrame(WsSession session, int symbolId, Trade trade) {
         long nowWall = System.currentTimeMillis();
         CandleAggregator agg = session.candles[symbolId];
         if (agg == null) {
             agg = new CandleAggregator();
             session.candles[symbolId] = agg;
-        } else if (agg.hasCandle() && agg.bucketOpen != nowWall - (nowWall % CandleAggregator.BUCKET_MILLIS)) {
-            // emit the closed previous candle first
-            sendText(session, binanceKlineJson(symbolId,
-                    agg.klineJson(binanceSymbolUpper(symbolId), true)));
         }
-        String kline = agg.onTrade(trade.priceTicks(), trade.quantity(), nowWall,
-                binanceSymbolUpper(symbolId));
+        long bucket = nowWall - (nowWall % CandleAggregator.BUCKET_MILLIS);
+        String closed = null;
+        if (agg.hasCandle() && agg.bucketOpen != bucket) {
+            closed = binanceKlineJson(symbolId,
+                    agg.klineJson(binanceSymbolUpper(symbolId), true));
+        }
         long now = System.nanoTime();
-        if (session.lastKlineSentNano == 0 || now - session.lastKlineSentNano >= KLINE_INTERVAL_NANOS) {
-            session.lastKlineSentNano = now;
-            sendText(session, binanceKlineJson(symbolId, kline));
+        int slot = symbolId % session.lastKlineSentNano.length;
+        if (session.lastKlineSentNano[slot] != 0
+                && now - session.lastKlineSentNano[slot] < KLINE_INTERVAL_NANOS) {
+            return closed;
         }
+        session.lastKlineSentNano[slot] = now;
+        String live = binanceKlineJson(symbolId, agg.onTrade(trade.priceTicks(), trade.quantity(), nowWall,
+                binanceSymbolUpper(symbolId)));
+        return closed != null ? closed + "\n" + live : live;
     }
 
     /** Wrap a raw kline payload in the combined-stream envelope. */
@@ -650,20 +770,6 @@ public final class GatewayServer {
         }
     }
 
-    private void sendText(WsSession session, String json) {
-        synchronized (session) {
-            if (!session.open) {
-                return;
-            }
-            try {
-                WsFrames.write(session.out, WsFrames.OP_TEXT, json.getBytes(StandardCharsets.UTF_8));
-            } catch (IOException e) {
-                session.closeQuietly();
-                sessions.remove(session);
-            }
-        }
-    }
-
     private static void sendPlain(HttpExchange exchange, int code, String text) throws IOException {
         byte[] body = text.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
@@ -689,8 +795,9 @@ public final class GatewayServer {
         private final Socket socket;
         final AtomicLong seq = new AtomicLong();
         final CandleAggregator[] candles = new CandleAggregator[PAIR_BASES.length];
-        volatile long lastDepthSentNano = 0;
-        volatile long lastKlineSentNano = 0;
+        final long[] lastDepthSentNano = new long[PAIR_BASES.length];
+        final long[] lastKlineSentNano = new long[PAIR_BASES.length];
+        volatile long lastPongNanos;
         volatile boolean open = true;
 
         WsSession(int symbolId, InputStream in, OutputStream out, Socket socket) {
@@ -702,6 +809,10 @@ public final class GatewayServer {
 
         long nextSeq() {
             return seq.incrementAndGet();
+        }
+
+        Socket socket() {
+            return socket;
         }
 
         void closeQuietly() {
