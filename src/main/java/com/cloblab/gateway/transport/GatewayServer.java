@@ -455,8 +455,8 @@ public final class GatewayServer {
         }
     }
 
-    private static final long DEPTH_INTERVAL_NANOS = 500_000_000L; // 500 ms
-    private static final long KLINE_INTERVAL_NANOS = 100_000_000L; // 100 ms
+    private static final long DEPTH_INTERVAL_NANOS = 1_000_000_000L; // 1 s (UI refresh cadence)
+    private static final long KLINE_INTERVAL_NANOS = 1_000_000_000L; // 1 s (UI refresh cadence)
 
     /** Binance depth10 + bookTicker at most every 500ms per session. */
     private void sendBinanceDepthThrottled(WsSession session, int symbolId) {
