@@ -13,14 +13,15 @@ public final class LatencyRecorder {
         this.samples = new long[Math.max(1, initialCapacity)];
     }
 
-    public void record(long nanos) {
+    /** Thread-safe: shard consumers may record concurrently into a shared recorder. */
+    public synchronized void record(long nanos) {
         if (count >= samples.length) {
             samples = Arrays.copyOf(samples, samples.length * 2);
         }
         samples[count++] = nanos;
     }
 
-    public int count() {
+    public synchronized int count() {
         return count;
     }
 
@@ -28,12 +29,21 @@ public final class LatencyRecorder {
         if (other == this) {
             throw new IllegalArgumentException("cannot merge a recorder into itself (unbounded growth)");
         }
-        for (int i = 0; i < other.count; i++) {
-            record(other.samples[i]);
+        long[] copy;
+        synchronized (other) {
+            copy = Arrays.copyOf(other.samples, other.count);
+        }
+        synchronized (this) {
+            for (long sample : copy) {
+                if (count >= samples.length) {
+                    samples = Arrays.copyOf(samples, samples.length * 2);
+                }
+                samples[count++] = sample;
+            }
         }
     }
 
-    public LatencyStats stats() {
+    public synchronized LatencyStats stats() {
         if (count == 0) {
             return new LatencyStats(0, 0, 0, 0, 0);
         }

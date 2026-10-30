@@ -17,4 +17,12 @@ public final class Sequencer {
     public long nextSequenceValue() {
         return nextSequence.get();
     }
+
+    /**
+     * After journal replay, ensure the next stamped sequence is strictly greater than
+     * {@code maxEventId} so ingress does not collide with replayed event ids.
+     */
+    public void advancePast(long maxEventId) {
+        nextSequence.updateAndGet(current -> Math.max(current, maxEventId + 1));
+    }
 }

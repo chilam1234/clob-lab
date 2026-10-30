@@ -50,6 +50,11 @@ public final class OrderBook implements OrderBookView {
         return orderIndex.containsKey(orderId);
     }
 
+    @Override
+    public List<Long> restingOrderIds() {
+        return List.copyOf(orderIndex.keySet());
+    }
+
     /** Quantity available on the opposite side at or better than limitPrice. */
     @Override
     public long availableAtOrBetter(Side takerSide, long limitPriceTicks) {

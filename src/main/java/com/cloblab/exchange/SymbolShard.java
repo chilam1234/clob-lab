@@ -3,6 +3,7 @@ package com.cloblab.exchange;
 import com.cloblab.engine.MatchingEngine;
 import com.cloblab.journal.OrderEvent;
 import com.cloblab.journal.OrderEventSink;
+import com.cloblab.latency.LatencyRecorder;
 import com.cloblab.marketdata.FairMarketDataPublisher;
 import com.cloblab.marketdata.L2Snapshot;
 import com.cloblab.model.MatchResult;
@@ -21,6 +22,10 @@ import com.cloblab.protocol.InboundCommand;
  * <p>Owns exactly one {@link FairMarketDataPublisher} and one journal stripe ({@link OrderEventSink});
  * staging/flush/append are unsynchronized SPSC calls from this shard's consumer (or the
  * synchronous {@link #processAll()} caller).
+ *
+ * <p>Watchdog (ADR-0011): uncaught consumer failures mark {@link #failed()}, log
+ * {@code [clob-shard] DEAD symbolId=N}, and run an injectable {@link #exitAction} (defaults to
+ * {@code System.exit(2)} so tests can assert without killing the JVM).
  */
 public final class SymbolShard {
     private static final long SHUTDOWN_JOIN_MILLIS = 5_000L;
@@ -30,17 +35,30 @@ public final class SymbolShard {
     private final RingBuffer<SequencedCommand> inboundRing;
     private final FairMarketDataPublisher publisher;
     private final OrderEventSink journal;
+    private final LatencyRecorder latencyRecorder;
 
     private volatile boolean running;
+    private volatile boolean failed;
     private Thread consumer;
+    private Runnable exitAction = SymbolShard::haltJvm;
 
     public SymbolShard(
             int symbolId, int ringCapacity, FairMarketDataPublisher publisher, OrderEventSink journal) {
+        this(symbolId, ringCapacity, publisher, journal, null);
+    }
+
+    public SymbolShard(
+            int symbolId,
+            int ringCapacity,
+            FairMarketDataPublisher publisher,
+            OrderEventSink journal,
+            LatencyRecorder latencyRecorder) {
         this.symbolId = symbolId;
         this.engine = new MatchingEngine();
         this.inboundRing = new RingBuffer<>(ringCapacity);
         this.publisher = publisher;
         this.journal = journal;
+        this.latencyRecorder = latencyRecorder;
     }
 
     /**
@@ -51,9 +69,11 @@ public final class SymbolShard {
         if (consumer != null && consumer.isAlive()) {
             return;
         }
+        failed = false;
         running = true;
         consumer = new Thread(this::runLoop, "clob-shard-" + symbolId);
         consumer.setDaemon(true);
+        consumer.setUncaughtExceptionHandler(this::onConsumerDeath);
         consumer.start();
     }
 
@@ -85,6 +105,47 @@ public final class SymbolShard {
         return engine;
     }
 
+    public boolean failed() {
+        return failed;
+    }
+
+    /** Consumer thread alive and not marked failed. */
+    public boolean isAlive() {
+        Thread thread = consumer;
+        return thread != null && thread.isAlive() && !failed;
+    }
+
+    public int ringDepth() {
+        return inboundRing.size();
+    }
+
+    public int ringCapacity() {
+        return inboundRing.capacity();
+    }
+
+    /** Injectable JVM-exit hook for tests (defaults to {@code System.exit(2)}). */
+    public void setExitAction(Runnable exitAction) {
+        this.exitAction = exitAction == null ? SymbolShard::haltJvm : exitAction;
+    }
+
+    @SuppressWarnings("SystemExit")
+    private static void haltJvm() {
+        System.exit(2);
+    }
+
+    /**
+     * Test / watchdog hook: same path as the uncaught exception handler.
+     * Package-visible so tests can assert without tearing down the JVM.
+     */
+    void onConsumerDeath(Thread thread, Throwable error) {
+        System.err.println("[clob-shard] DEAD symbolId=" + symbolId);
+        if (error != null) {
+            error.printStackTrace(System.err);
+        }
+        failed = true;
+        exitAction.run();
+    }
+
     public boolean enqueue(SequencedCommand command) {
         if (command.command().symbolId() != symbolId) {
             throw new IllegalArgumentException("wrong symbol for shard " + symbolId);
@@ -98,6 +159,7 @@ public final class SymbolShard {
         SequencedCommand sequenced;
         while ((sequenced = inboundRing.poll()) != null) {
             apply(sequenced);
+            recordLatency(sequenced);
             processed++;
         }
         return processed;
@@ -131,7 +193,15 @@ public final class SymbolShard {
                 throw ignored;
             }
         }
+        recordLatency(sequenced);
         publisher.flush(symbolId);
+    }
+
+    private void recordLatency(SequencedCommand sequenced) {
+        if (latencyRecorder == null) {
+            return;
+        }
+        latencyRecorder.record(System.nanoTime() - sequenced.ingressNano());
     }
 
     private void apply(SequencedCommand sequenced) {

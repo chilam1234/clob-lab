@@ -94,6 +94,13 @@ tasks.register<JavaExec>("runUi") {
     description = "Serve the trade UI + WebSocket gateway on http://localhost:8080"
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set("com.cloblab.gateway.transport.GatewayServer")
+    // ADR-0011 resiliency floor defaults (override with -D on the CLI as needed).
+    systemProperty("clob.journal", System.getProperty("clob.journal", "file"))
+    systemProperty("clob.journal.dir", System.getProperty("clob.journal.dir", "./journal"))
+    systemProperty("clob.maxNotional", System.getProperty("clob.maxNotional", "100000000"))
+    systemProperty("clob.maxPrice", System.getProperty("clob.maxPrice", "1000000"))
+    systemProperty("clob.clientMsgRate", System.getProperty("clob.clientMsgRate", "200"))
+    systemProperty("clob.clientMsgBurst", System.getProperty("clob.clientMsgBurst", "400"))
 }
 
 tasks.register<JavaExec>("runGateway") {
@@ -101,6 +108,8 @@ tasks.register<JavaExec>("runGateway") {
     description = "Run cloud-exchange gateway demo (threaded shards, per-frame MD)"
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set("com.cloblab.gateway.GatewayRunner")
+    systemProperty("clob.journal", System.getProperty("clob.journal", "file"))
+    systemProperty("clob.journal.dir", System.getProperty("clob.journal.dir", "./journal"))
 }
 
 jmh {

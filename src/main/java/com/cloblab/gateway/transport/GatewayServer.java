@@ -1,9 +1,13 @@
 package com.cloblab.gateway.transport;
 
+import com.cloblab.exchange.CloudExchange;
+import com.cloblab.exchange.SymbolShard;
 import com.cloblab.gateway.Gateway;
 import com.cloblab.gateway.GatewayFrame;
 import com.cloblab.gateway.GatewayResult;
 import com.cloblab.gateway.MockMarketMaker;
+import com.cloblab.journal.JournalBootstrap;
+import com.cloblab.latency.LatencyRecorder;
 import com.cloblab.marketdata.BookLevel;
 import com.cloblab.marketdata.L2Snapshot;
 import com.cloblab.model.Side;
@@ -27,7 +31,9 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -59,15 +65,27 @@ public final class GatewayServer {
     private final AtomicBoolean running = new AtomicBoolean();
     private final java.util.List<MockMarketMaker> mockMakers = new java.util.ArrayList<>();
     private final boolean startMock;
+    private final AtomicLong msgsIn = new AtomicLong();
+    private final AtomicLong droppedSessions = new AtomicLong();
+    private final AtomicLong rateLimitedSessions = new AtomicLong();
+    private final double clientMsgRate;
+    private final double clientMsgBurst;
 
     private HttpServer httpServer;
     private ServerSocket wsListener;
     private ExecutorService executor;
+    private ScheduledExecutorService shardWatchdog;
     private int port;
     private int wsPort;
 
     public GatewayServer() {
-        this(new Gateway(PAIR_BASES.length, DEFAULT_RING), defaultUiDir(), resolveMockArg());
+        this(createDefaultGateway(), defaultUiDir(), resolveMockArg());
+    }
+
+    /** Build gateway from system properties; caller must {@link JournalBootstrap#replay} before serve. */
+    static Gateway createDefaultGateway() {
+        CloudExchange exchange = CloudExchange.fromSystemProperties(PAIR_BASES.length, DEFAULT_RING);
+        return new Gateway(exchange);
     }
 
     public GatewayServer(Gateway gateway, Path uiDir) {
@@ -78,6 +96,8 @@ public final class GatewayServer {
         this.gateway = gateway;
         this.uiDir = uiDir;
         this.startMock = startMock;
+        this.clientMsgRate = Double.parseDouble(System.getProperty("clob.clientMsgRate", "200"));
+        this.clientMsgBurst = Double.parseDouble(System.getProperty("clob.clientMsgBurst", "400"));
     }
 
     /** CLI: --no-mock disables the synthetic market maker. */
@@ -118,10 +138,13 @@ public final class GatewayServer {
         if (running.get()) {
             throw new IllegalStateException("already started");
         }
+        // ADR-0011: replay journal into engines BEFORE accepting connections / starting shards.
+        JournalBootstrap.replay(gateway.exchange());
         if (subscribed.compareAndSet(false, true)) {
             gateway.subscribe(this::onGatewayFrame);
         }
         gateway.start();
+        startShardWatchdog();
         executor = Executors.newCachedThreadPool(namedThreads());
 
         httpServer = HttpServer.create(new InetSocketAddress(listenPort), 0);
@@ -155,6 +178,10 @@ public final class GatewayServer {
 
     public synchronized void stop() {
         running.set(false);
+        if (shardWatchdog != null) {
+            shardWatchdog.shutdownNow();
+            shardWatchdog = null;
+        }
         for (MockMarketMaker maker : mockMakers) {
             maker.stop();
         }
@@ -180,6 +207,27 @@ public final class GatewayServer {
             executor = null;
         }
         gateway.shutdown();
+    }
+
+    private void startShardWatchdog() {
+        shardWatchdog = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "clob-shard-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+        // ScheduledFuture ignored: sweep runs forever during server lifetime; a failed sweep
+        // surfaces via the executor's default exception logging.
+        var unused = shardWatchdog.scheduleAtFixedRate(this::sweepShardLiveness, 1, 1, TimeUnit.SECONDS);
+        assert unused != null;
+    }
+
+    /** 1 Hz: log dead shards (cheap — no alloc beyond the log line). */
+    private void sweepShardLiveness() {
+        for (SymbolShard shard : gateway.exchange().router().shards()) {
+            if (!shard.isAlive()) {
+                System.err.println("[clob-shard] DEAD symbolId=" + shard.symbolId());
+            }
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -226,7 +274,22 @@ public final class GatewayServer {
 
     private void handle(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        if (!"GET".equals(exchange.getRequestMethod())) {
+        String method = exchange.getRequestMethod();
+        if ("GET".equals(method) && "/health".equals(path)) {
+            handleHealth(exchange);
+            return;
+        }
+        if ("GET".equals(method) && "/stats".equals(path)) {
+            handleStats(exchange);
+            return;
+        }
+        if ("POST".equals(method) && path.startsWith("/admin/")) {
+            // Localhost-only / no-auth: this admin surface is for lab/dev. Real deployments
+            // MUST gate /admin/* (network policy, mTLS, or an authenticating reverse proxy).
+            handleAdmin(exchange, path);
+            return;
+        }
+        if (!"GET".equals(method)) {
             byte[] body = "method not allowed".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(405, body.length);
             try (OutputStream out = exchange.getResponseBody()) {
@@ -244,6 +307,106 @@ public final class GatewayServer {
             return;
         }
         handleStatic(exchange, path);
+    }
+
+    private void handleHealth(HttpExchange exchange) throws IOException {
+        int alive = 0;
+        SymbolShard[] shards = gateway.exchange().router().shards();
+        for (SymbolShard shard : shards) {
+            if (shard.isAlive()) {
+                alive++;
+            }
+        }
+        boolean ok = alive == shards.length;
+        String json = "{\"ok\":" + ok
+                + ",\"threadsAlive\":" + alive
+                + ",\"halted\":" + gateway.halted()
+                + ",\"journalEvents\":" + gateway.exchange().journal().size()
+                + ",\"sessions\":" + sessions.size()
+                + '}';
+        sendJson(exchange, ok ? 200 : 503, json);
+    }
+
+    private void handleStats(HttpExchange exchange) throws IOException {
+        LatencyRecorder.LatencyStats lat = gateway.exchange().latencyRecorder().stats();
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("{\"p50us\":").append(lat.p50Ns() / 1000)
+                .append(",\"p99us\":").append(lat.p99Ns() / 1000)
+                .append(",\"p999us\":").append(lat.p999Ns() / 1000)
+                .append(",\"shards\":[");
+        SymbolShard[] shards = gateway.exchange().router().shards();
+        for (int i = 0; i < shards.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            SymbolShard shard = shards[i];
+            sb.append("{\"ringDepth\":").append(shard.ringDepth())
+                    .append(",\"depthCap\":").append(shard.ringCapacity())
+                    .append(",\"alive\":").append(shard.isAlive())
+                    .append('}');
+        }
+        sb.append("],\"wsSessions\":").append(sessions.size())
+                .append(",\"droppedSessions\":").append(droppedSessions.get())
+                .append(",\"msgsIn\":").append(msgsIn.get())
+                .append(",\"rateLimitedSessions\":").append(rateLimitedSessions.get())
+                .append('}');
+        sendJson(exchange, 200, sb.toString());
+    }
+
+    private void handleAdmin(HttpExchange exchange, String path) throws IOException {
+        // Drain request body (POST may carry a form body we ignore beyond query).
+        try (InputStream in = exchange.getRequestBody()) {
+            in.readAllBytes();
+        }
+        String query = exchange.getRequestURI().getRawQuery();
+        if ("/admin/halt".equals(path)) {
+            gateway.halt();
+            sendJson(exchange, 200, "{\"ok\":true,\"halted\":true}");
+            return;
+        }
+        if ("/admin/resume".equals(path)) {
+            gateway.resume();
+            sendJson(exchange, 200, "{\"ok\":true,\"halted\":false}");
+            return;
+        }
+        if ("/admin/cancelall".equals(path)) {
+            String symbolRaw = queryParam(query, "symbol");
+            // symbol omitted / blank / "0" / "all" → every symbol (ADR-0011).
+            if (symbolRaw == null || symbolRaw.isBlank()
+                    || "0".equals(symbolRaw) || "all".equalsIgnoreCase(symbolRaw)) {
+                int cancelled = gateway.exchange().cancelAllSymbols();
+                sendJson(exchange, 200, "{\"ok\":true,\"cancelled\":" + cancelled + ",\"symbol\":\"all\"}");
+                return;
+            }
+            int symbolId = Integer.parseInt(symbolRaw);
+            int cancelled = gateway.exchange().cancelAll(symbolId);
+            sendJson(exchange, 200, "{\"ok\":true,\"cancelled\":" + cancelled + ",\"symbol\":" + symbolId + '}');
+            return;
+        }
+        sendJson(exchange, 404, "{\"ok\":false,\"error\":\"unknown admin op\"}");
+    }
+
+    private static String queryParam(String query, String name) {
+        if (query == null || query.isEmpty()) {
+            return null;
+        }
+        for (String part : query.split("&", -1)) {
+            int eq = part.indexOf('=');
+            String key = eq < 0 ? part : part.substring(0, eq);
+            if (name.equals(key)) {
+                return eq < 0 ? "" : part.substring(eq + 1);
+            }
+        }
+        return null;
+    }
+
+    private static void sendJson(HttpExchange exchange, int code, String json) throws IOException {
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(code, body.length);
+        try (OutputStream out = exchange.getResponseBody()) {
+            out.write(body);
+        }
     }
 
     private void handleStatic(HttpExchange exchange, String path) throws IOException {
@@ -337,7 +500,8 @@ public final class GatewayServer {
                         // enforced server-side by ping/pong (fanout thread), not by read timeouts
                         socket.setSoTimeout(0);
                         socket.setTcpNoDelay(true);
-                        WsSession session = new WsSession(0, streams.in(), streams.out(), socket);
+                        WsSession session = new WsSession(
+                                0, streams.in(), streams.out(), socket, clientMsgBurst);
                         sessions.add(session);
                         try {
                             sessionLoop(session);
@@ -428,6 +592,14 @@ public final class GatewayServer {
     }
 
     private void onClientText(WsSession session, String json) {
+        msgsIn.incrementAndGet();
+        if (!session.tryConsume(clientMsgRate)) {
+            if (session.rateLimitedCount == 1) {
+                rateLimitedSessions.incrementAndGet();
+            }
+            fanOut(session, "{\"t\":\"reject\",\"reason\":\"RATE_LIMITED\"}");
+            return;
+        }
         GatewayResult result;
         try {
             result = executeOp(gateway, session.symbolId, json);
@@ -558,7 +730,9 @@ public final class GatewayServer {
     private void dropSession(WsSession session, String reason) {
         System.err.println("[clob-ws] session dropped: " + reason);
         session.open = false;
-        sessions.remove(session);
+        if (sessions.remove(session)) {
+            droppedSessions.incrementAndGet();
+        }
         try {
             session.socket().close();
         } catch (IOException ignored) {
@@ -788,6 +962,34 @@ public final class GatewayServer {
         };
     }
 
+    /**
+     * Token-bucket rate limit helper (package-visible for unit tests).
+     * Refills at {@code ratePerSec}; capacity {@code burst}.
+     */
+    static final class TokenBucket {
+        private double tokens;
+        private long lastNanos;
+        private final double burst;
+
+        TokenBucket(double burst) {
+            this.burst = burst;
+            this.tokens = burst;
+            this.lastNanos = System.nanoTime();
+        }
+
+        synchronized boolean tryConsume(double ratePerSec) {
+            long now = System.nanoTime();
+            double elapsedSec = (now - lastNanos) / 1_000_000_000.0;
+            lastNanos = now;
+            tokens = Math.min(burst, tokens + elapsedSec * ratePerSec);
+            if (tokens < 1.0) {
+                return false;
+            }
+            tokens -= 1.0;
+            return true;
+        }
+    }
+
     private static final class WsSession {
         final int symbolId;
         final InputStream in;
@@ -797,14 +999,25 @@ public final class GatewayServer {
         final CandleAggregator[] candles = new CandleAggregator[PAIR_BASES.length];
         final long[] lastDepthSentNano = new long[PAIR_BASES.length];
         final long[] lastKlineSentNano = new long[PAIR_BASES.length];
+        final TokenBucket bucket;
+        int rateLimitedCount;
         volatile long lastPongNanos;
         volatile boolean open = true;
 
-        WsSession(int symbolId, InputStream in, OutputStream out, Socket socket) {
+        WsSession(int symbolId, InputStream in, OutputStream out, Socket socket, double burst) {
             this.symbolId = symbolId;
             this.in = in;
             this.out = out;
             this.socket = socket;
+            this.bucket = new TokenBucket(burst);
+        }
+
+        boolean tryConsume(double ratePerSec) {
+            boolean ok = bucket.tryConsume(ratePerSec);
+            if (!ok) {
+                rateLimitedCount++;
+            }
+            return ok;
         }
 
         long nextSeq() {

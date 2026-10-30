@@ -1,5 +1,7 @@
 package com.cloblab.gateway;
 
+import com.cloblab.exchange.CloudExchange;
+import com.cloblab.journal.JournalBootstrap;
 import com.cloblab.model.Side;
 
 import java.util.concurrent.CountDownLatch;
@@ -7,10 +9,14 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Demo of the threaded gateway: dedicated shard consumers and per-frame fair MD.
+ *
+ * <p>Boot order (ADR-0011): construct exchange → journal replay → start shards → serve work.
  */
 public final class GatewayRunner {
     public static void main(String[] args) {
-        Gateway gateway = new Gateway(2, 1024);
+        CloudExchange exchange = CloudExchange.fromSystemProperties(2, 1024);
+        JournalBootstrap.replay(exchange);
+        Gateway gateway = new Gateway(exchange);
         CountDownLatch seeded = new CountDownLatch(4);
         gateway.subscribe(frame -> {
             System.out.println(

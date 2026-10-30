@@ -69,6 +69,11 @@ public final class FastOrderBook implements OrderBookView {
     }
 
     @Override
+    public List<Long> restingOrderIds() {
+        return List.copyOf(orderIndex.keySet());
+    }
+
+    @Override
     public long availableAtOrBetter(Side takerSide, long limitPriceTicks) {
         long available = 0;
         if (takerSide == Side.BUY) {

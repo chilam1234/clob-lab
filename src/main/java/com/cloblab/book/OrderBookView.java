@@ -4,6 +4,8 @@ import com.cloblab.marketdata.L2Snapshot;
 import com.cloblab.model.Order;
 import com.cloblab.model.Side;
 
+import java.util.List;
+
 /** Common order book API used by {@link com.cloblab.engine.MatchingEngine}. */
 public interface OrderBookView {
     Long bestBid();
@@ -15,6 +17,9 @@ public interface OrderBookView {
     long totalAskQuantity();
 
     boolean contains(long orderId);
+
+    /** Resting order ids (admin mass-cancel). Snapshot; not live. */
+    List<Long> restingOrderIds();
 
     long availableAtOrBetter(Side takerSide, long limitPriceTicks);
 

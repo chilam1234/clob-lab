@@ -73,6 +73,17 @@ public final class MatchingEngine implements OrderBookView.MatchSink {
         return book.cancel(orderId);
     }
 
+    /** Cancel every resting order (admin mass-cancel). Returns how many were removed. */
+    public int cancelAll() {
+        int removed = 0;
+        for (Long orderId : book.restingOrderIds()) {
+            if (book.cancel(orderId)) {
+                removed++;
+            }
+        }
+        return removed;
+    }
+
     private void validate(long orderId, Side side, long priceTicks, long quantity, boolean allowRest) {
         if (quantity <= 0) {
             throw new IllegalArgumentException("quantity must be positive: " + quantity);

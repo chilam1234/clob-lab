@@ -18,9 +18,13 @@ import java.util.function.Consumer;
  *
  * <p>SPSC: {@link #submit} is the ring producer (CloudExchange routing) for each shard;
  * the shard consumer thread is the sole {@code poll()} caller after {@link #start()}.
+ *
+ * <p>Kill switch (ADR-0011): when {@link #halted()}, SUBMITs are rejected with reason
+ * {@code HALTED}; CANCELs remain accepted (cancel-only degraded mode).
  */
 public final class Gateway {
     private final CloudExchange exchange;
+    private volatile boolean halted;
 
     public Gateway(int symbolCount, int ringCapacityPerShard) {
         this(new CloudExchange(symbolCount, ringCapacityPerShard, Integer.MAX_VALUE));
@@ -40,6 +44,18 @@ public final class Gateway {
 
     public void shutdown() {
         exchange.shutdown();
+    }
+
+    public void halt() {
+        halted = true;
+    }
+
+    public void resume() {
+        halted = false;
+    }
+
+    public boolean halted() {
+        return halted;
     }
 
     /**
@@ -93,6 +109,9 @@ public final class Gateway {
     }
 
     private GatewayResult validate(InboundCommand command) {
+        if (halted && command.kind() == InboundCommand.Kind.SUBMIT) {
+            return GatewayResult.rejected("HALTED");
+        }
         if (command.kind() == InboundCommand.Kind.CANCEL) {
             return null;
         }
@@ -108,6 +127,22 @@ public final class Gateway {
         if (command.orderType() == OrderType.LIMIT
                 && (command.priceTicks() == null || command.priceTicks() <= 0)) {
             return GatewayResult.rejected("limit/market price must be positive: " + command.priceTicks());
+        }
+        if (command.priceTicks() != null) {
+            long maxPrice = Long.getLong("clob.maxPrice", 1_000_000L);
+            long price = command.priceTicks();
+            if (price < 1L || price > maxPrice) {
+                return GatewayResult.rejected("PRICE_OUT_OF_RANGE");
+            }
+            long maxNotional = Long.getLong("clob.maxNotional", 100_000_000L);
+            try {
+                long notional = Math.multiplyExact(price, command.quantity());
+                if (notional > maxNotional) {
+                    return GatewayResult.rejected("NOTIONAL_EXCEEDED");
+                }
+            } catch (ArithmeticException overflow) {
+                return GatewayResult.rejected("NOTIONAL_EXCEEDED");
+            }
         }
         if (exchange.router().shard(command.symbolId()).engine().book().contains(command.orderId())) {
             return GatewayResult.rejected(
