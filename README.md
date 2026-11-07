@@ -1,6 +1,6 @@
 # clob-lab
 
-A small Java learning project for **Central Limit Order Book (CLOB)** matching and **low-latency trading concepts**.
+A small Java learning project for **Central Limit Order Book (CLOB)** matching and **low-latency trading concepts**, plus an **Aave V3/V4 whale risk monitor** prototype (Python risk engine → A2UI React factory).
 
 ## What this implements
 
@@ -11,6 +11,7 @@ A small Java learning project for **Central Limit Order Book (CLOB)** matching a
 - **Event journal + replay**
 - **Cloud-exchange pipeline** (2024+ research): sequencer, FancyPQ ingress, ring buffers, sharded matchers
 - JMH + load testing
+- **Aave whale risk monitor** — HF / OALI / eHF / LLR verdict matrix + A2UI declarative UI
 
 ## Project layout
 
@@ -24,8 +25,30 @@ src/main/java/com/cloblab/
   journal/        EventJournal, EventReplayer
   marketdata/     L2Snapshot, FairMarketDataPublisher
   loadtest/       LoadTestRunner
+aave_monitor/     Python risk engine + A2UI schema builder + tests
+ui/src/aave/      A2UIRenderer + whale risk demo page
 docs/guide.html   Visual guide + 2024+ reading list
 ```
+
+## Aave whale risk monitor
+
+### Backend tests (Python)
+
+```bash
+python3 -m pip install -r aave_monitor/requirements.txt
+PYTHONPATH=. python3 -m pytest aave_monitor/tests -v
+```
+
+### Frontend demo (React / A2UI)
+
+```bash
+cd ui
+npm install
+npm run dev:aave
+# open http://localhost:5173/aave-risk.html
+```
+
+The demo loads the baseline whale CRITICAL scenario (and HIGH / STABLE fixtures). **ActionGroup buttons only log/toast** — they do not submit Flashbots bundles or execute liquidations.
 
 ## Run
 

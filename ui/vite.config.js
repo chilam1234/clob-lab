@@ -10,6 +10,14 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        aaveRisk: fileURLToPath(new URL("./aave-risk.html", import.meta.url)),
+      },
+    },
+  },
   server: {
     proxy: {
       "/ws": {

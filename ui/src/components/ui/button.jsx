@@ -26,7 +26,7 @@ const buttonVariants = cva(
   },
 );
 
-function Button({ className, variant, size, type = "button", ...props }) {
+function Button({ className, variant = "default", size = "default", type = "button", ...props }) {
   return (
     <button
       type={type}
