@@ -70,7 +70,9 @@ export function SparklineChart({
     p.oracle_arbitrage_risk,
   ]);
   const left = niceRange(leftVals, 0.9, 1.2);
-  const right = niceRange(rightVals, 0, 1);
+  const rightRaw = niceRange(rightVals, 0, 1);
+  // Util / OALI are non-negative — keep the right axis from dipping below 0.
+  const right = { min: Math.max(0, rightRaw.min), max: Math.max(rightRaw.max, 0.01) };
 
   const xAt = (i: number) =>
     margin.left + (points.length <= 1 ? 0 : (i / (points.length - 1)) * plotW);
