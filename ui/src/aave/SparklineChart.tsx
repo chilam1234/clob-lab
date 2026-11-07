@@ -14,24 +14,13 @@ const SERIES: Series[] = [
   { key: "oracle_arbitrage_risk", label: "OALI", color: "#c83232", axis: "right" },
 ];
 
-function niceRange(values: number[], fallbackMin: number, fallbackMax: number) {
-  const finite = values.filter((n) => Number.isFinite(n));
-  if (finite.length === 0) return { min: fallbackMin, max: fallbackMax };
-  let min = Math.min(...finite);
-  let max = Math.max(...finite);
-  if (min === max) {
-    min = Math.max(0, min - Math.abs(min) * 0.05 - 0.01);
-    max = max + Math.abs(max) * 0.05 + 0.01;
-  } else {
-    const pad = (max - min) * 0.08;
-    min -= pad;
-    max += pad;
-  }
-  return { min, max };
-}
+/** Fixed Y domains — scales do not auto-zoom, so lines only move when values move. */
+const LEFT_Y = { min: 0.9, max: 1.3 }; // Health Factor
+const RIGHT_Y = { min: 0, max: 1 }; // Utilization / OALI
+/** Fixed visible window so X positions stay stable as new ticks arrive. */
+const WINDOW_SECONDS = 15 * 60;
 
 function formatTime(ts: number): string {
-  // Demo audience is Asia/Hong_Kong; VM clock is UTC.
   return new Date(ts * 1000).toLocaleTimeString("en-HK", {
     timeZone: "Asia/Hong_Kong",
     hour: "2-digit",
@@ -42,7 +31,6 @@ function formatTime(ts: number): string {
 }
 
 function ticks(min: number, max: number, count: number): number[] {
-  if (count < 2) return [min];
   const out: number[] = [];
   for (let i = 0; i < count; i++) {
     out.push(min + ((max - min) * i) / (count - 1));
@@ -64,49 +52,39 @@ export function SparklineChart({
   const plotH = height - margin.top - margin.bottom;
   const latest = points[points.length - 1];
 
-  const leftVals = points.flatMap((p) => [p.effective_hf, p.baseline_hf]);
-  const rightVals = points.flatMap((p) => [
-    p.pending_utilization,
-    p.oracle_arbitrage_risk,
-  ]);
-  const left = niceRange(leftVals, 0.9, 1.2);
-  const rightRaw = niceRange(rightVals, 0, 1);
-  // Util / OALI are non-negative — keep the right axis from dipping below 0.
-  const right = { min: Math.max(0, rightRaw.min), max: Math.max(rightRaw.max, 0.01) };
+  const tEnd = latest?.ts ?? Date.now() / 1000;
+  const tStart = tEnd - WINDOW_SECONDS;
+  const visible = points.filter((p) => p.ts >= tStart && p.ts <= tEnd);
 
-  const xAt = (i: number) =>
-    margin.left + (points.length <= 1 ? 0 : (i / (points.length - 1)) * plotW);
+  const xAt = (ts: number) =>
+    margin.left + ((ts - tStart) / WINDOW_SECONDS) * plotW;
   const yLeft = (v: number) =>
-    margin.top + plotH - ((v - left.min) / (left.max - left.min || 1)) * plotH;
+    margin.top +
+    plotH -
+    ((v - LEFT_Y.min) / (LEFT_Y.max - LEFT_Y.min)) * plotH;
   const yRight = (v: number) =>
     margin.top +
     plotH -
-    ((v - right.min) / (right.max - right.min || 1)) * plotH;
+    ((v - RIGHT_Y.min) / (RIGHT_Y.max - RIGHT_Y.min)) * plotH;
 
   function seriesPath(key: keyof HistoryPoint, axis: "left" | "right"): string {
     const yFn = axis === "left" ? yLeft : yRight;
-    return points
-      .map((p, i) => {
-        const v = Number(p[key]);
-        if (!Number.isFinite(v)) return "";
-        const cmd = i === 0 ? "M" : "L";
-        return `${cmd}${xAt(i).toFixed(1)},${yFn(v).toFixed(1)}`;
-      })
-      .filter(Boolean)
-      .join(" ");
+    let started = false;
+    const parts: string[] = [];
+    for (const p of visible) {
+      const v = Number(p[key]);
+      if (!Number.isFinite(v)) continue;
+      const x = xAt(p.ts);
+      const y = yFn(v);
+      parts.push(`${started ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`);
+      started = true;
+    }
+    return parts.join(" ");
   }
 
-  const xTickIdx =
-    points.length <= 1
-      ? [0]
-      : [
-          0,
-          Math.floor((points.length - 1) / 2),
-          points.length - 1,
-        ].filter((v, i, arr) => arr.indexOf(v) === i);
-
-  const leftTicks = ticks(left.min, left.max, 5);
-  const rightTicks = ticks(right.min, right.max, 5);
+  const xTickTs = [tStart, tStart + WINDOW_SECONDS / 2, tEnd];
+  const leftTicks = ticks(LEFT_Y.min, LEFT_Y.max, 5);
+  const rightTicks = ticks(RIGHT_Y.min, RIGHT_Y.max, 5);
 
   return (
     <section className="rounded-[4px] border border-border bg-surface-raised p-3">
@@ -115,11 +93,11 @@ export function SparklineChart({
           {title}
         </h2>
         <span className="text-xs text-text-muted">
-          {points.length} ticks
+          {visible.length} pts · fixed 15m window
           {latest ? ` · block ${latest.block_number}` : ""}
         </span>
       </div>
-      {points.length < 2 ? (
+      {visible.length < 2 ? (
         <p className="text-sm text-text-muted">
           Collecting live samples… charts appear after the second poll.
         </p>
@@ -129,11 +107,9 @@ export function SparklineChart({
             viewBox={`0 0 ${width} ${height}`}
             className="h-64 w-full"
             role="img"
-            aria-label="Live health factor and utilization chart with labeled axes"
+            aria-label="Live health factor and utilization chart with fixed axes"
           >
             <rect width={width} height={height} fill="#fafaf7" />
-
-            {/* Plot background */}
             <rect
               x={margin.left}
               y={margin.top}
@@ -142,7 +118,6 @@ export function SparklineChart({
               fill="#f4f4f1"
             />
 
-            {/* Horizontal grid + left Y ticks */}
             {leftTicks.map((t) => (
               <g key={`ly-${t}`}>
                 <line
@@ -162,12 +137,11 @@ export function SparklineChart({
                   fill="#6b7075"
                   fontFamily="ui-monospace, monospace"
                 >
-                  {t.toFixed(3)}
+                  {t.toFixed(2)}
                 </text>
               </g>
             ))}
 
-            {/* Right Y ticks */}
             {rightTicks.map((t) => (
               <text
                 key={`ry-${t}`}
@@ -178,11 +152,10 @@ export function SparklineChart({
                 fill="#6b7075"
                 fontFamily="ui-monospace, monospace"
               >
-                {t.toFixed(3)}
+                {t.toFixed(2)}
               </text>
             ))}
 
-            {/* Axes */}
             <line
               x1={margin.left}
               y1={margin.top}
@@ -208,44 +181,29 @@ export function SparklineChart({
               strokeWidth={1.5}
             />
 
-            {/* X ticks */}
-            {xTickIdx.map((i) => {
-              const p = points[i];
-              return (
-                <g key={`x-${i}`}>
-                  <line
-                    x1={xAt(i)}
-                    x2={xAt(i)}
-                    y1={margin.top + plotH}
-                    y2={margin.top + plotH + 5}
-                    stroke="#30343a"
-                    strokeWidth={1}
-                  />
-                  <text
-                    x={xAt(i)}
-                    y={margin.top + plotH + 18}
-                    textAnchor="middle"
-                    fontSize="10"
-                    fill="#6b7075"
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    {formatTime(p.ts)}
-                  </text>
-                  <text
-                    x={xAt(i)}
-                    y={margin.top + plotH + 32}
-                    textAnchor="middle"
-                    fontSize="9"
-                    fill="#6b7075"
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    blk {p.block_number}
-                  </text>
-                </g>
-              );
-            })}
+            {xTickTs.map((ts) => (
+              <g key={`x-${ts}`}>
+                <line
+                  x1={xAt(ts)}
+                  x2={xAt(ts)}
+                  y1={margin.top + plotH}
+                  y2={margin.top + plotH + 5}
+                  stroke="#30343a"
+                  strokeWidth={1}
+                />
+                <text
+                  x={xAt(ts)}
+                  y={margin.top + plotH + 18}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fill="#6b7075"
+                  fontFamily="ui-monospace, monospace"
+                >
+                  {formatTime(ts)}
+                </text>
+              </g>
+            ))}
 
-            {/* Axis titles */}
             <text
               x={14}
               y={margin.top + plotH / 2}
@@ -276,10 +234,9 @@ export function SparklineChart({
               fill="#30343a"
               fontFamily="Georgia, serif"
             >
-              Time (Hong Kong) / Ethereum block
+              Time (Hong Kong) — fixed 15 min window
             </text>
 
-            {/* Series */}
             {SERIES.map((s) => {
               const d = seriesPath(s.key, s.axis);
               return d ? (
