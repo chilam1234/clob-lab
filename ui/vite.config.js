@@ -20,6 +20,11 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // Aave live risk SSE/REST (python -m aave_monitor.live_server)
+      "/api/aave": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+      },
       // CLOB gateway WS only — do not proxy `/` or HTML would 502 without Java up.
       "/ws": {
         target: "ws://localhost:8080",

@@ -39,16 +39,21 @@ python3 -m pip install -r aave_monitor/requirements.txt
 PYTHONPATH=. python3 -m pytest aave_monitor/tests -v
 ```
 
-### Frontend demo (React / A2UI)
+### Live data demo (on-chain + charts)
 
 ```bash
+# terminal 1 — live risk feed (Ethereum RPC + Aave Oracle/GraphQL + CoinGecko)
+python3 -m pip install -r aave_monitor/requirements.txt
+PYTHONPATH=. python3 -m aave_monitor.live_server --port 8787
+
+# terminal 2 — UI
 cd ui
 npm install
 npm run dev:aave
-# open http://localhost:5173/aave-risk.html
+# open http://localhost:5173/aave-risk.html  (default tab: LIVE on-chain)
 ```
 
-The demo loads the baseline whale CRITICAL scenario (and HIGH / STABLE fixtures). **ActionGroup buttons only log/toast** — they do not submit Flashbots bundles or execute liquidations.
+The LIVE tab streams real Aave V3 positions, oracle/off-chain wstETH deviation, pool utilization, and plots HF / util / OALI over time. Fixture CRITICAL / HIGH / STABLE buttons remain for offline schema demos. **ActionGroup buttons only log/toast** — they do not submit Flashbots bundles or execute liquidations.
 
 ## Run
 
