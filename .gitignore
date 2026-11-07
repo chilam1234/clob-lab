@@ -5,3 +5,9 @@ build/
 *.iml
 .DS_Store
 gradle.properties
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+ui/dist/
+ui/node_modules/

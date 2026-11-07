@@ -1,0 +1,349 @@
+{
+  "critical": {
+    "assessment": {
+      "whale_address": "0x1111111254fb6c44bac0bed2854e76f90643097d",
+      "baseline_hf": 1.025,
+      "effective_hf": 1.015,
+      "oracle_arbitrage_risk": 0.35,
+      "liquidity_lock_risk": "CRITICAL_FREEZE",
+      "system_verdict": "CRITICAL"
+    },
+    "schema": {
+      "a2ui_version": "1.0.0",
+      "layout": {
+        "type": "grid",
+        "columns": 12,
+        "gap": "16px"
+      },
+      "components": [
+        {
+          "id": "whale-critical-alert",
+          "type": "Banner",
+          "grid_span": {
+            "sm": 12,
+            "md": 12,
+            "lg": 12
+          },
+          "props": {
+            "status": "danger",
+            "title": "SYSTEMIC INSOLVENCY ALERT: Whale Liquidation Hazard",
+            "description": "Whale position is tracking an effective market Health Factor below threshold; oracle deviation and mempool utilization drive liquidation risk."
+          }
+        },
+        {
+          "id": "whale-position-data-table",
+          "type": "DataTable",
+          "grid_span": {
+            "sm": 12,
+            "md": 12,
+            "lg": 12
+          },
+          "props": {
+            "title": "Whale Account Stream Projections",
+            "headers": [
+              "Metric Field",
+              "On-Chain View (Stale)",
+              "Effective Real-Time Stream",
+              "Risk Assessment State"
+            ],
+            "rows": [
+              {
+                "cells": [
+                  "Health Factor",
+                  "1.025",
+                  "1.015",
+                  "CRITICAL"
+                ],
+                "meta": {
+                  "tone": "danger"
+                }
+              },
+              {
+                "cells": [
+                  "Oracle Arbitrage Index (OALI)",
+                  "\u2014",
+                  "0.35",
+                  "ELEVATED"
+                ],
+                "meta": {
+                  "tone": "danger"
+                }
+              },
+              {
+                "cells": [
+                  "Pool Utilization (incl. mempool)",
+                  "\u2014",
+                  "96.0%",
+                  "CRITICAL_FREEZE"
+                ],
+                "meta": {
+                  "tone": "danger"
+                }
+              },
+              {
+                "cells": [
+                  "Collateral (USD)",
+                  "$30,000,000.00",
+                  "$30,000,000.00",
+                  "TRACKED"
+                ],
+                "meta": {
+                  "tone": "neutral"
+                }
+              },
+              {
+                "cells": [
+                  "Debt (USD)",
+                  "$24,000,000.00",
+                  "$24,000,000.00",
+                  "TRACKED"
+                ],
+                "meta": {
+                  "tone": "neutral"
+                }
+              },
+              {
+                "cells": [
+                  "DEX Slippage Penalty",
+                  "0%",
+                  "1.0%",
+                  "APPLIED"
+                ],
+                "meta": {
+                  "tone": "warning"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "whale-mitigation-actions",
+          "type": "ActionGroup",
+          "grid_span": {
+            "sm": 12,
+            "md": 12,
+            "lg": 12
+          },
+          "props": {
+            "alignment": "right",
+            "actions": [
+              {
+                "label": "Simulate Private Deleverage Bundle (Demo Only)",
+                "action_id": "simulate_private_deleverage",
+                "variant": "primary",
+                "payload": {
+                  "target_user": "0x1111111254fb6c44bac0bed2854e76f90643097d",
+                  "pool_address": "0x87870B9256fdC90E544834DE2bA981273C572a52",
+                  "repay_amount_base": "24000000"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "stream": {
+      "whale_address": "0x1111111254fb6c44bac0bed2854e76f90643097d",
+      "collateral_usd": 30000000.0,
+      "debt_usd": 24000000.0,
+      "liquidation_threshold": 0.82,
+      "oracle_deviation": 0.035,
+      "dex_slippage": 0.01,
+      "pending_utilization": 0.96
+    }
+  },
+  "high": {
+    "assessment": {
+      "whale_address": "0x1111111254fb6c44bac0bed2854e76f90643097d",
+      "baseline_hf": 1.025,
+      "effective_hf": 1.025,
+      "oracle_arbitrage_risk": 0.0,
+      "liquidity_lock_risk": "NORMAL",
+      "system_verdict": "HIGH"
+    },
+    "schema": {
+      "a2ui_version": "1.0.0",
+      "layout": {
+        "type": "grid",
+        "columns": 12,
+        "gap": "16px"
+      },
+      "components": [
+        {
+          "id": "whale-high-alert",
+          "type": "Banner",
+          "grid_span": {
+            "sm": 12,
+            "md": 12,
+            "lg": 12
+          },
+          "props": {
+            "status": "warning",
+            "title": "Elevated Risk: Whale Position Near Liquidation Boundary",
+            "description": "Effective HF 1.025 is inside the HIGH band (\u2264 1.12). Utilization 85.0%; LLR=NORMAL."
+          }
+        },
+        {
+          "id": "metric-ehf",
+          "type": "MetricCard",
+          "grid_span": {
+            "sm": 12,
+            "md": 6,
+            "lg": 4
+          },
+          "props": {
+            "label": "Effective Health Factor",
+            "value": "1.025",
+            "helper_text": "Baseline HF 1.025",
+            "change_value": "+0.000"
+          }
+        },
+        {
+          "id": "metric-oali",
+          "type": "MetricCard",
+          "grid_span": {
+            "sm": 12,
+            "md": 6,
+            "lg": 4
+          },
+          "props": {
+            "label": "Oracle Arbitrage Index",
+            "value": "0.00",
+            "helper_text": "Deviation 1.00%"
+          }
+        },
+        {
+          "id": "metric-util",
+          "type": "MetricCard",
+          "grid_span": {
+            "sm": 12,
+            "md": 6,
+            "lg": 4
+          },
+          "props": {
+            "label": "Pool Utilization",
+            "value": "85.0%",
+            "helper_text": "NORMAL"
+          }
+        },
+        {
+          "id": "whale-high-actions",
+          "type": "ActionGroup",
+          "grid_span": {
+            "sm": 12,
+            "md": 12,
+            "lg": 12
+          },
+          "props": {
+            "alignment": "right",
+            "actions": [
+              {
+                "label": "Simulate Collateral Top-Up (Demo Only)",
+                "action_id": "simulate_collateral_topup",
+                "variant": "primary",
+                "payload": {
+                  "target_user": "0x1111111254fb6c44bac0bed2854e76f90643097d",
+                  "note": "simulation_only"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "stream": {
+      "whale_address": "0x1111111254fb6c44bac0bed2854e76f90643097d",
+      "collateral_usd": 30000000.0,
+      "debt_usd": 24000000.0,
+      "liquidation_threshold": 0.82,
+      "oracle_deviation": 0.01,
+      "dex_slippage": 0.0,
+      "pending_utilization": 0.85
+    }
+  },
+  "stable": {
+    "assessment": {
+      "whale_address": "0x1111111254fb6c44bac0bed2854e76f90643097d",
+      "baseline_hf": 1.367,
+      "effective_hf": 1.367,
+      "oracle_arbitrage_risk": 0.0,
+      "liquidity_lock_risk": "NORMAL",
+      "system_verdict": "STABLE"
+    },
+    "schema": {
+      "a2ui_version": "1.0.0",
+      "layout": {
+        "type": "grid",
+        "columns": 12,
+        "gap": "16px"
+      },
+      "components": [
+        {
+          "id": "whale-stable-banner",
+          "type": "Banner",
+          "grid_span": {
+            "sm": 12,
+            "md": 12,
+            "lg": 12
+          },
+          "props": {
+            "status": "success",
+            "title": "Stable: Whale Position Within Safe Envelope",
+            "description": "Effective HF 1.367 clear of HIGH/CRITICAL bands. OALI 0.00; utilization 80.0%."
+          }
+        },
+        {
+          "id": "metric-ehf",
+          "type": "MetricCard",
+          "grid_span": {
+            "sm": 12,
+            "md": 6,
+            "lg": 4
+          },
+          "props": {
+            "label": "Effective Health Factor",
+            "value": "1.367",
+            "helper_text": "Baseline HF 1.367"
+          }
+        },
+        {
+          "id": "metric-oali",
+          "type": "MetricCard",
+          "grid_span": {
+            "sm": 12,
+            "md": 6,
+            "lg": 4
+          },
+          "props": {
+            "label": "Oracle Arbitrage Index",
+            "value": "0.00",
+            "helper_text": "Within tolerance"
+          }
+        },
+        {
+          "id": "metric-util",
+          "type": "MetricCard",
+          "grid_span": {
+            "sm": 12,
+            "md": 6,
+            "lg": 4
+          },
+          "props": {
+            "label": "Pool Utilization",
+            "value": "80.0%",
+            "helper_text": "NORMAL"
+          }
+        }
+      ]
+    },
+    "stream": {
+      "whale_address": "0x1111111254fb6c44bac0bed2854e76f90643097d",
+      "collateral_usd": 40000000.0,
+      "debt_usd": 24000000.0,
+      "liquidation_threshold": 0.82,
+      "oracle_deviation": 0.01,
+      "dex_slippage": 0.0,
+      "pending_utilization": 0.8
+    }
+  }
+}
