@@ -20,12 +20,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // CLOB gateway WS only — do not proxy `/` or HTML would 502 without Java up.
       "/ws": {
         target: "ws://localhost:8080",
         ws: true,
-      },
-      "/": {
-        target: "http://localhost:8080",
       },
     },
   },
